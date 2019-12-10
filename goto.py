@@ -189,7 +189,7 @@ def _patch_code(code):
             pos = _write_instruction(buf, pos, 'JUMP_ABSOLUTE', len(buf) // _BYTECODE.jump_unit)
             
             if pos > end:
-                raise SyntaxError('Internal error - not enough bytecode space')
+                raise SyntaxError('Goto in an incredibly huge function') # not sure if reachable
             
             size += _get_instruction_size('JUMP_ABSOLUTE', end // _BYTECODE.jump_unit)
             
