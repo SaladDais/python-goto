@@ -86,6 +86,19 @@ def _parse_instructions(code):
         extended_arg_offset = None
         yield (dis.opname[opcode], oparg, offset)
 
+def _get_instruction_size(opname, oparg=0):
+    size = 1
+    
+    extended_arg = oparg >> _BYTECODE.argument_bits
+    if extended_arg != 0:
+        size += _get_instruction_size('EXTENDED_ARG', extended_arg)
+        oparg &= (1 << _BYTECODE.argument_bits) - 1
+    
+    opcode = dis.opmap[opname]
+    if opcode >= _BYTECODE.have_argument:    
+        size += _BYTECODE.argument.size
+        
+    return size    
 
 def _write_instruction(buf, pos, opname, oparg=0):
     extended_arg = oparg >> _BYTECODE.argument_bits
@@ -164,37 +177,38 @@ def _patch_code(code):
         target_depth = len(target_stack)
         if origin_stack[:target_depth] != target_stack:
             raise SyntaxError('Jump into different block')
+        
+        size = 0
+        for i in range(len(origin_stack) - target_depth):
+            size += _get_instruction_size('POP_BLOCK')
+        size += _get_instruction_size('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit)
+        
+        moved_to_end = False
+        if pos + size > end:
+            # not enough space, add at end
+            pos = _write_instruction(buf, pos, 'JUMP_ABSOLUTE', len(buf) // _BYTECODE.jump_unit)
+            
+            if pos > end:
+                raise SyntaxError('Internal error - not enough bytecode space')
+            
+            size += _get_instruction_size('JUMP_ABSOLUTE', end // _BYTECODE.jump_unit)
+            
+            moved_to_end = True
+            pos = len(buf)
+            buf.extend([0] * size)
 
-        failed = False
         try:
             for i in range(len(origin_stack) - target_depth):
                 pos = _write_instruction(buf, pos, 'POP_BLOCK')
-
-            if target >= end:
-                rel_target = (target - pos) // _BYTECODE.jump_unit
-                oparg_bits = 0
-
-                while True:
-                    rel_target -= (1 + _BYTECODE.argument.size) // _BYTECODE.jump_unit
-                    if rel_target >> oparg_bits == 0:
-                        pos = _write_instruction(buf, pos, 'EXTENDED_ARG', 0)
-                        break
-
-                    oparg_bits += _BYTECODE.argument_bits
-                    if rel_target >> oparg_bits == 0:
-                        break
-
-                pos = _write_instruction(buf, pos, 'JUMP_FORWARD', rel_target)
-            else:
-                pos = _write_instruction(buf, pos, 'JUMP_ABSOLUTE', target // _BYTECODE.jump_unit)
-
-        except (IndexError, struct.error):
-            failed = True
-
-        if failed or pos > end:
-            raise SyntaxError('Jump out of too many nested blocks')
-
-        _inject_nop_sled(buf, pos, end)
+            pos = _write_instruction(buf, pos, 'JUMP_ABSOLUTE', target // _BYTECODE.jump_unit)
+        except (IndexError, struct.error) as e:
+            raise SyntaxError("Internal error", e)
+            
+        if moved_to_end:
+            pos = _write_instruction(buf, pos, 'JUMP_ABSOLUTE', end // _BYTECODE.jump_unit)
+            
+        else:
+            _inject_nop_sled(buf, pos, end)
 
     return _make_code(code, _array_to_bytes(buf))
 
