@@ -112,6 +112,15 @@ def _get_instructions_size(ops):
             size += _get_instruction_size(op)
         else:
             size += _get_instruction_size(*op)
+    return size    
+
+def _get_instructions_size(ops):
+    size = 0
+    for op in ops:
+        if isinstance(op, str):
+            size += _get_instruction_size(op)
+        else:
+            size += _get_instruction_size(*op) 
     return size
 
 def _write_instruction(buf, pos, opname, oparg=0):
