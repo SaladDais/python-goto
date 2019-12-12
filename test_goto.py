@@ -63,6 +63,18 @@ def test_jump_out_of_loop():
     assert func() == 0
 
 
+def test_jump_out_of_loop_and_survive():
+    @with_goto
+    def func():
+        for i in range(10):
+            for j in range(10):
+                goto .end
+            label .end
+        return (i, j)
+
+    assert func() == (9, 0)
+
+
 def test_jump_into_loop():
     def func():
         for i in range(10):
@@ -180,6 +192,22 @@ def test_jump_out_of_try_block():
     assert func() == None
 
 
+"""def test_jump_out_of_try_block_and_survive():
+    @with_goto
+    def func():
+        for i in range(10):
+            try:
+                rv = None
+                goto .end
+            except:
+                rv = 'except'
+            finally:
+                rv = 'finally'
+            label .end
+        return (i, rv)
+
+    assert func() == (9, None)"""
+
 def test_jump_into_try_block():
     def func():
         try:
@@ -189,6 +217,34 @@ def test_jump_into_try_block():
         goto .block
 
     pytest.raises(SyntaxError, with_goto, func)
+
+
+"""def test_jump_out_of_except_block():
+    @with_goto
+    def func():
+        try:
+            rv = 1 / 0
+        except:
+            rv = 'except'
+            goto .end
+        finally:
+            rv = 'finally'
+        label .end
+        return rv
+
+    assert func() == 'except'"""
+
+
+"""def test_jump_into_except_block():
+    def func():
+        try:
+            pass
+        except:
+            label .block
+            pass
+        goto .block
+
+    pytest.raises(SyntaxError, with_goto, func)"""
 
 
 def test_jump_to_unknown_label():
