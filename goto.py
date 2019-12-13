@@ -210,6 +210,21 @@ def _find_labels_and_gotos(code):
         pop_block()
 
     for opname4, oparg4, offset4 in _parse_instructions(code.co_code, 3):
+        endoffset1 = offset2
+                    
+        # check for special offsets
+        if for_exits and offset1 == for_exits[-1]:
+            pop_block()
+            for_exits.pop()
+        if excepts and offset1 == excepts[-1]:
+            block_counter += 1
+            block_stack.append(('<EXCEPT>', block_counter))
+            excepts.pop()
+        if finallies and offset1 == finallies[-1]:
+            block_counter += 1
+            block_stack.append(('<FINALLY>', block_counter))
+            finallies.pop()
+            
         # check for special opcodes
         if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
             if opname2 == 'LOAD_ATTR' and opname3 == 'POP_TOP':
@@ -232,13 +247,13 @@ def _find_labels_and_gotos(code):
             block_counter += 1
             block_stack.append((opname1, block_counter))
             if opname1 == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
-                excepts.append(offset1 + oparg1)
+                excepts.append(endoffset1 + oparg1)
             elif opname1 == 'SETUP_FINALLY':
-                finallies.append(offset1 + oparg1)
+                finallies.append(endoffset1 + oparg1)
         elif not _BYTECODE.has_loop_blocks and opname1 == 'FOR_ITER':
             block_counter += 1
             block_stack.append((opname1, block_counter))
-            for_exits.append(offset1 + oparg1)
+            for_exits.append(endoffset1 + oparg1)
         elif opname1 == 'POP_BLOCK':
             pop_block()
         elif opname1 == 'POP_EXCEPT':
@@ -248,19 +263,6 @@ def _find_labels_and_gotos(code):
                 pop_block_of_type('<FINALLY>')
         elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START') and _BYTECODE.has_setup_with:
             block_stack.append(('<FINALLY>', -1)) # temporary block to match END_FINALLY
-            
-        # check for special offsets
-        if for_exits and offset1 == for_exits[-1]:
-            pop_block()
-            for_exits.pop()
-        if excepts and offset1 == excepts[-1]:
-            block_counter += 1
-            block_stack.append(('<EXCEPT>', block_counter))
-            excepts.pop()
-        if finallies and offset1 == finallies[-1]:
-            block_counter += 1
-            block_stack.append(('<FINALLY>', block_counter))
-            finallies.pop()
 
         opname0, oparg0, offset0 = opname1, oparg1, offset1
         opname1, oparg1, offset1 = opname2, oparg2, offset2
