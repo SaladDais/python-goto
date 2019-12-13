@@ -58,14 +58,18 @@ try:
 except TypeError:
     _patched_code_cache = {} # ...unless not supported
 
-def _make_code(code, codestring):
+def _make_code(code, codestring, varnames, consts):
+    nlocals = len(varnames)
+    consts = tuple(consts)
+       
     try:
-        return code.replace(co_code=codestring) # new in 3.8+
-    except:
+        # code.replace is new in 3.8+
+        return code.replace(co_code=codestring, co_nlocals=nlocals, co_varnames=varnames, co_consts=consts) 
+    except:        
         args = [
-            code.co_argcount,  code.co_nlocals,     code.co_stacksize,
-            code.co_flags,     codestring,          code.co_consts,
-            code.co_names,     code.co_varnames,    code.co_filename,
+            code.co_argcount,  nlocals,             code.co_stacksize,
+            code.co_flags,     codestring,          consts,
+            code.co_names,     varnames,            code.co_filename,
             code.co_name,      code.co_firstlineno, code.co_lnotab,
             code.co_freevars,  code.co_cellvars
         ]
@@ -163,7 +167,7 @@ def _find_labels_and_gotos(code):
     gotos = []
 
     block_stack = []
-    block_counter = 0
+    block_counter = 1
     for_exits = []
     excepts = []
     finallies = []
@@ -185,6 +189,10 @@ def _find_labels_and_gotos(code):
         for goto in gotos:
             replace_block_in_stack(goto[3], old_block, new_block)
     
+    def push_block(opname, oparg=0):
+        block_stack.append((opname, oparg, block_counter))
+        return block_counter + 1 # to be assigned to block_counter
+    
     def pop_block():
         if block_stack:
             block_stack.pop()
@@ -195,7 +203,7 @@ def _find_labels_and_gotos(code):
         if block_stack and block_stack[-1][0] != type:
             # in 3.8, only finally blocks are supported, so we must determine the except/finally nature ourselves, and replace the block afterwards 
             if not _BYTECODE.has_setup_except and type == "<EXCEPT>" and block_stack[-1][0] == '<FINALLY>':
-                replace_block(block_stack[-1], (type, block_stack[-1][1]))
+                replace_block(block_stack[-1], (type,) + block_stack[-1][1:])
             else:
                 _warn_bug("mismatched block type")
         pop_block()
@@ -213,19 +221,25 @@ def _find_labels_and_gotos(code):
                     gotos.append((offset1,
                                   offset4,
                                   oparg2,
-                                  list(block_stack)))
+                                  list(block_stack),
+                                  False))
+            elif opname2 == 'LOAD_ATTR' and opname3 == 'STORE_ATTR':
+                if code.co_names[oparg1] == 'goto' and code.co_names[oparg2] == 'into':
+                    gotos.append((offset1,
+                                  offset4,
+                                  oparg3,
+                                  list(block_stack),
+                                  True))
         elif opname1 in ('SETUP_LOOP',
                          'SETUP_EXCEPT', 'SETUP_FINALLY',
                          'SETUP_WITH', 'SETUP_ASYNC_WITH'):
-            block_counter += 1
-            block_stack.append((opname1, block_counter))
+            block_counter = push_block(opname1, oparg1)
             if opname1 == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
                 excepts.append(offset1 + oparg1)
             elif opname1 == 'SETUP_FINALLY':
                 finallies.append(offset1 + oparg1)
         elif not _BYTECODE.has_loop_blocks and opname1 == 'FOR_ITER':
-            block_counter += 1
-            block_stack.append((opname1, block_counter))
+            block_counter = push_block(opname1, oparg1)
             for_exits.append(offset1 + oparg1)
         elif opname1 == 'POP_BLOCK':
             pop_block()
@@ -235,19 +249,17 @@ def _find_labels_and_gotos(code):
             if opname0 != 'JUMP_FORWARD': # hack for dummy end-finally in except block (correct fix would be a jump-aware reading of instructions!)
                 pop_block_of_type('<FINALLY>')
         elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START') and _BYTECODE.has_setup_with:
-            block_stack.append(('<FINALLY>', -1)) # temporary block to match END_FINALLY
+            block_counter = push_block('<FINALLY>') # temporary block to match END_FINALLY
             
         # check for special offsets
         if for_exits and offset1 == for_exits[-1]:
             pop_block()
             for_exits.pop()
         if excepts and offset1 == excepts[-1]:
-            block_counter += 1
-            block_stack.append(('<EXCEPT>', block_counter))
+            block_counter = push_block('<EXCEPT>')
             excepts.pop()
         if finallies and offset1 == finallies[-1]:
-            block_counter += 1
-            block_stack.append(('<FINALLY>', block_counter))
+            block_counter = push_block('<FINALLY>')
             finallies.pop()
 
         opname0, oparg0, offset0 = opname1, oparg1, offset1
@@ -265,6 +277,26 @@ def _inject_nop_sled(buf, pos, end):
     while pos < end:
         pos = _write_instruction(buf, pos, 'NOP')
 
+def _inject_ops(buf, pos, end, ops):
+    size = _get_instructions_size(ops)
+    if pos + size > end:
+        # not enough space, add code at buffer end and jump there & back
+        buf_end = len(buf)
+        
+        go_to_end_ops = [('JUMP_ABSOLUTE', buf_end // _BYTECODE.jump_unit)]
+        
+        if pos + _get_instructions_size(go_to_end_ops) > end:
+            raise SyntaxError('Goto in an incredibly huge function') # not sure if reachable
+        
+        pos = _write_instructions(buf, pos, go_to_end_ops)
+        _inject_nop_sled(buf, pos, end)
+        
+        buf.extend([0] * size)
+        _write_instructions(buf, buf_end, ops)
+        
+    else:
+        pos = _write_instructions(buf, pos, ops)
+        _inject_nop_sled(buf, pos, end)
 
 def _patch_code(code):
     new_code = _patched_code_cache.get(code)
@@ -273,22 +305,32 @@ def _patch_code(code):
     
     labels, gotos = _find_labels_and_gotos(code)
     buf = array.array('B', code.co_code)
+    temp_var = None
+    
+    varnames = code.co_varnames
+    consts = list(code.co_consts)
+        
+    def get_const(value):
+        try:
+            i = consts.index(value)
+        except ValueError:
+            i = len(consts)
+            consts.append(value)
+        return i
 
     for pos, end, _ in labels.values():
         _inject_nop_sled(buf, pos, end)
 
-    for pos, end, label, origin_stack in gotos:
+    for pos, end, label, origin_stack, is_into in gotos:
         try:
             _, target, target_stack = labels[label]
         except KeyError:
             raise SyntaxError('Unknown label {0!r}'.format(code.co_names[label]))
 
-        target_depth = len(target_stack)
-        if origin_stack[:target_depth] != target_stack:
-            raise SyntaxError('Jump into different block')
-        
         ops = []
-        for block, _ in reversed(origin_stack[target_depth:]):
+
+        target_depth = len(target_stack)        
+        for block, _, _ in reversed(origin_stack[target_depth:]):
             if block == 'FOR_ITER':
                 ops.append('POP_TOP')
             elif block == '<EXCEPT>':
@@ -301,31 +343,37 @@ def _patch_code(code):
                     ops.append('POP_TOP')
                  # pypy 3.6 keeps a block around until END_FINALLY; python 3.8 reuses SETUP_FINALLY for SETUP_EXCEPT (where END_FINALLY is not accepted). What will pypy 3.8 do?
                 if __pypy__ and block in ('SETUP_FINALLY', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
-                    ops.append(('LOAD_CONST', code.co_consts.index(None)))
+                    ops.append(('LOAD_CONST', get_const(None)))
                     ops.append('END_FINALLY')
+                    
+        if origin_stack[:target_depth] != target_stack:
+            if not is_into:
+                raise SyntaxError('Jump into different block without "into" syntax')
+            
+            if temp_var is None:
+                temp_var = len(varnames)
+                varnames += ('goto.into.temp',)
+            
+            origin_depth = len(origin_stack)
+            ops.append(('STORE_FAST', temp_var)) # each block must see the right amount of data on the stack
+            
+            tuple_i = 0
+            for block, blockarg, _ in target_stack[origin_depth:]:
+                if block in ('SETUP_LOOP', 'FOR_ITER'):
+                    if block != 'FOR_ITER':
+                        ops.append((block, blockarg))
+                    ops.append(('LOAD_FAST', temp_var))
+                    ops.append(('LOAD_CONST', get_const(tuple_i)))
+                    ops.append('BINARY_SUBSCR')
+                    tuple_i += 1
+                else:
+                    raise SyntaxError('Being worked on...')
+                    
         ops.append(('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit))
         
-        size = _get_instructions_size(ops)
-        if pos + size > end:
-            # not enough space, add code at buffer end and jump there & back
-            buf_end = len(buf)
-            
-            go_to_end_ops = [('JUMP_ABSOLUTE', buf_end // _BYTECODE.jump_unit)]
-            
-            if pos + _get_instructions_size(go_to_end_ops) > end:
-                raise SyntaxError('Goto in an incredibly huge function') # not sure if reachable
-            
-            pos = _write_instructions(buf, pos, go_to_end_ops)
-            _inject_nop_sled(buf, pos, end)
-            
-            buf.extend([0] * size)
-            _write_instructions(buf, buf_end, ops)
-            
-        else:
-            pos = _write_instructions(buf, pos, ops)
-            _inject_nop_sled(buf, pos, end)
+        _inject_ops(buf, pos, end, ops)
 
-    new_code = _make_code(code, _array_to_bytes(buf))
+    new_code = _make_code(code, _array_to_bytes(buf), varnames, consts)
     
     _patched_code_cache[code] = new_code
     return new_code

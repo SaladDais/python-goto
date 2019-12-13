@@ -96,6 +96,17 @@ def test_jump_into_loop():
 
     pytest.raises(SyntaxError, with_goto, func)
 
+
+def test_jump_into_loop_params():
+    @with_goto
+    def func():
+        goto.into .loop = iter(range(5)),
+        for i in range(10):
+            label .loop
+        return i
+
+    assert func() == 4
+    
 def test_jump_out_of_nested_2_loops():
     @with_goto
     def func():
