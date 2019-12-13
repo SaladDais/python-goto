@@ -283,6 +283,46 @@ def test_jump_across_loops():
 
     pytest.raises(SyntaxError, with_goto, func)
 
+def test_jump_across_loops_with_params():
+    @with_goto
+    def func():
+        for i in range(10):
+            goto.into .other_loop = iter(range(3)),
+
+        for i in range(10):
+            label .other_loop
+            
+        return i
+
+    assert func() == 2
+
+def test_jump_across_loops_with_params_and_live():
+    @with_goto
+    def func():
+        for i in range(5):
+            for j in range(10):
+                for k in range(10):
+                    goto.into .other_loop = iter(range(3)),
+    
+            for j in range(10):
+                label .other_loop
+            
+        return (i, j)
+
+    assert func() == (4, 2)
+    
+def test_jump_into_with_unneeded_params_and_live():
+    @with_goto
+    def func():
+        for i in range(10):
+            j = 0
+            goto.into .not_loop = ()
+            j = 1
+            label .not_loop
+        return (i, j)
+    
+    assert func() == (9, 0)
+    
 class Context:
     def __init__(self):
         self.enters = 0

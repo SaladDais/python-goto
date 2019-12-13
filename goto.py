@@ -16,6 +16,10 @@ try:
 except AttributeError:
     _array_to_bytes = array.array.tostring
 
+try:
+    _range = xrange
+except NameError:
+    _range = range
 
 class _Bytecode:
     def __init__(self):
@@ -109,7 +113,7 @@ def _parse_instructions(code, yield_nones_at_end=0):
         extended_arg_offset = None
         yield (dis.opname[opcode], oparg, offset)
         
-    for _ in range(yield_nones_at_end):
+    for _ in _range(yield_nones_at_end):
         yield (None, None, None)
 
 def _get_instruction_size(opname, oparg=0):
@@ -329,8 +333,23 @@ def _patch_code(code):
 
         ops = []
 
-        target_depth = len(target_stack)        
-        for block, _, _ in reversed(origin_stack[target_depth:]):
+        common_depth = min(len(origin_stack), len(target_stack))
+        for i in _range(common_depth):
+            if origin_stack[i] != target_stack[i]:
+                common_depth = i
+                break
+            
+        if is_into:            
+            if temp_var is None:
+                temp_var = len(varnames)
+                varnames += ('goto.into.temp',)
+            
+            ops.append(('STORE_FAST', temp_var)) # must do this before any blocks are pushed/popped
+            
+        elif common_depth < len(target_stack):
+            raise SyntaxError('Jump into different block without "into" syntax')            
+
+        for block, _, _ in reversed(origin_stack[common_depth:]):
             if block == 'FOR_ITER':
                 ops.append('POP_TOP')
             elif block == '<EXCEPT>':
@@ -345,31 +364,20 @@ def _patch_code(code):
                 if __pypy__ and block in ('SETUP_FINALLY', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
                     ops.append(('LOAD_CONST', get_const(None)))
                     ops.append('END_FINALLY')
-                    
-        if origin_stack[:target_depth] != target_stack:
-            if not is_into:
-                raise SyntaxError('Jump into different block without "into" syntax')
-            
-            if temp_var is None:
-                temp_var = len(varnames)
-                varnames += ('goto.into.temp',)
-            
-            origin_depth = len(origin_stack)
-            ops.append(('STORE_FAST', temp_var)) # each block must see the right amount of data on the stack
-            
-            tuple_i = 0
-            for block, blockarg, _ in target_stack[origin_depth:]:
+        
+        tuple_i = 0
+        for block, blockarg, _ in target_stack[common_depth:]:
+            if block in ('SETUP_LOOP', 'FOR_ITER'):
+                if block != 'FOR_ITER':
+                    ops.append((block, blockarg))
+                ops.append(('LOAD_FAST', temp_var))
+                ops.append(('LOAD_CONST', get_const(tuple_i)))
+                ops.append('BINARY_SUBSCR')
+                tuple_i += 1
                 if block in ('SETUP_LOOP', 'FOR_ITER'):
-                    if block != 'FOR_ITER':
-                        ops.append((block, blockarg))
-                    ops.append(('LOAD_FAST', temp_var))
-                    ops.append(('LOAD_CONST', get_const(tuple_i)))
-                    ops.append('BINARY_SUBSCR')
-                    tuple_i += 1
-                    if block in ('SETUP_LOOP', 'FOR_ITER'):
-                        ops.append('GET_ITER') # ensure the stack item is an iter, to avoid FOR_ITER crashing. Side-effect: convert iterables to iterators
-                else:
-                    raise SyntaxError('Being worked on...')
+                    ops.append('GET_ITER') # ensure the stack item is an iter, to avoid FOR_ITER crashing. Side-effect: convert iterables to iterators
+            else:
+                raise SyntaxError('Being worked on...')
                     
         ops.append(('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit))
         
