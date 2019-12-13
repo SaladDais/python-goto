@@ -360,6 +360,32 @@ def test_jump_out_of_finally_block_and_live():
 
     assert func() == (2, 0, 'finally')
 
+def test_jump_out_of_try_in_except_in_finally_and_live():
+    @with_goto
+    def func():
+        for i in range(3):
+            for j in range(3):
+                try:
+                    rv = None
+                finally:
+                    rv = 'finally'
+                    try:
+                        rv = 1 / 0
+                    except:
+                        rv = 'except'
+                        try:
+                            rv = 'try'
+                            goto .end
+                        except:
+                            rv = 'except2'
+                        finally:
+                            rv = 'finally2'
+                    rv = 'end'
+            label .end
+        return i, j, rv
+
+    assert func() == (2, 0, 'try')
+
 
 def test_jump_to_unknown_label():
     def func():
