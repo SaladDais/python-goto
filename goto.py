@@ -177,6 +177,7 @@ def _find_labels_and_gotos(code):
     for_exits = []
     excepts = []
     finallies = []
+    last_block = None
 
     opname0 = oparg0 = offset0 = None
     opname1 = oparg1 = offset1 = None # the main one we're looking at each loop iteration
@@ -201,7 +202,7 @@ def _find_labels_and_gotos(code):
     
     def pop_block():
         if block_stack:
-            block_stack.pop()
+            return block_stack.pop()
         else:
             _warn_bug("can't pop block")
             
@@ -212,7 +213,7 @@ def _find_labels_and_gotos(code):
                 replace_block(block_stack[-1], (type,) + block_stack[-1][1:])
             else:
                 _warn_bug("mismatched block type")
-        pop_block()
+        return pop_block()
         
     jump_targets = set(dis.findlabels(code.co_code))
     dead = False
@@ -226,7 +227,7 @@ def _find_labels_and_gotos(code):
                 
             # check for special offsets
             if for_exits and offset1 == for_exits[-1]:
-                pop_block()
+                last_block = pop_block()
                 for_exits.pop()
             if excepts and offset1 == excepts[-1]:
                 block_counter = push_block('<EXCEPT>')
@@ -268,13 +269,16 @@ def _find_labels_and_gotos(code):
                 block_counter = push_block(opname1, oparg1)
                 for_exits.append(endoffset1 + oparg1)
             elif opname1 == 'POP_BLOCK':
-                pop_block()
+                last_block = pop_block()
             elif opname1 == 'POP_EXCEPT':
-                pop_block_of_type('<EXCEPT>')
+                last_block = pop_block_of_type('<EXCEPT>')
             elif opname1 == 'END_FINALLY':
-                pop_block_of_type('<FINALLY>')
-            elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START') and _BYTECODE.has_setup_with:
-                block_counter = push_block('<FINALLY>') # temporary block to match END_FINALLY
+                last_block = pop_block_of_type('<FINALLY>')
+            elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START'):
+                if _BYTECODE.has_setup_with:
+                    block_counter = push_block('<FINALLY>') # temporary block to match END_FINALLY
+                else:
+                    replace_block(last_block, ('SETUP_WITH',) + last_block[1:]) # python 2.6 - finally was actually with
             
         if opname1 in ('JUMP_ABSOLUTE', 'JUMP_FORWARD'):
             dead = True
@@ -388,6 +392,8 @@ def _patch_code(code):
                 tuple_i += 1
                 if block in ('SETUP_LOOP', 'FOR_ITER'):
                     ops.append('GET_ITER') # ensure the stack item is an iter, to avoid FOR_ITER crashing. Side-effect: convert iterables to iterators
+            elif block in ('SETUP_EXCEPT', 'SETUP_FINALLY'):
+                ops.append((block, blockarg))
             elif block == '<FINALLY>':
                 if _BYTECODE.pypy_finally_semantics:
                     ops.append('SETUP_FINALLY')
@@ -399,7 +405,7 @@ def _patch_code(code):
                 ops.append(('SETUP_EXCEPT' if _BYTECODE.has_setup_except else 'SETUP_FINALLY', _get_instructions_size(raise_ops))) 
                 ops += raise_ops
                 for _ in _range(3):
-                    ops.append("POP_TOP")
+                    ops.append("POP_TOP") 
             else:
                 raise SyntaxError('Being worked on...')
                     
