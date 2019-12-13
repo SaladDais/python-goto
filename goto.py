@@ -48,7 +48,11 @@ class _Bytecode:
 
 _BYTECODE = _Bytecode()
 
-_patched_code_cache = weakref.WeakKeyDictionary()
+_patched_code_cache = weakref.WeakKeyDictionary() # use a weak dictionary in case code objects can be garbage-collected
+try:
+    _patched_code_cache[_Bytecode.__init__.__code__] = None
+except TypeError:
+    _patched_code_cache = {} # ...unless not supported
 
 def _make_code(code, codestring):
     try:
