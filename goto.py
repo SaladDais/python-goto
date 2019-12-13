@@ -64,18 +64,16 @@ try:
 except TypeError:
     _patched_code_cache = {} # ...unless not supported
 
-def _make_code(code, codestring, varnames, consts):
-    nlocals = len(varnames)
-    consts = tuple(consts)
-       
+def _make_code(code, codestring, data):
     try:
         # code.replace is new in 3.8+
-        return code.replace(co_code=codestring, co_nlocals=nlocals, co_varnames=varnames, co_consts=consts) 
+        return code.replace(co_code=codestring, co_nlocals=data.nlocals, co_varnames=data.varnames, 
+                            co_consts=data.consts, co_names=data.names) 
     except:        
         args = [
-            code.co_argcount,  nlocals,             code.co_stacksize,
-            code.co_flags,     codestring,          consts,
-            code.co_names,     varnames,            code.co_filename,
+            code.co_argcount,  data.nlocals,        code.co_stacksize,
+            code.co_flags,     codestring,          data.consts,
+            data.names,        data.varnames,       code.co_filename,
             code.co_name,      code.co_firstlineno, code.co_lnotab,
             code.co_freevars,  code.co_cellvars
         ]
@@ -318,6 +316,35 @@ def _inject_ops(buf, pos, end, ops):
     else:
         pos = _write_instructions(buf, pos, ops)
         _inject_nop_sled(buf, pos, end)
+        
+class _CodeData:
+    def __init__(self, code):
+        self.nlocals = code.co_nlocals
+        self.varnames = code.co_varnames
+        self.consts = code.co_consts
+        self.names = code.co_names
+                
+    def get_const(self, value):
+        try:
+            i = self.consts.index(value)
+        except ValueError:
+            i = len(self.consts)
+            self.consts += (value,)
+        return i
+    
+    def get_name(self, value):
+        try:
+            i = self.names.index(value)
+        except ValueError:
+            i = len(self.names)
+            self.names += (value,)
+        return i
+    
+    def add_var(self, name):
+        idx = len(self.varnames)
+        self.varnames += (name,)
+        self.nlocals += 1
+        return idx
 
 def _patch_code(code):
     new_code = _patched_code_cache.get(code)
@@ -328,16 +355,7 @@ def _patch_code(code):
     buf = array.array('B', code.co_code)
     temp_var = None
     
-    varnames = code.co_varnames
-    consts = list(code.co_consts)
-        
-    def get_const(value):
-        try:
-            i = consts.index(value)
-        except ValueError:
-            i = len(consts)
-            consts.append(value)
-        return i
+    data = _CodeData(code) 
 
     for pos, end, _ in labels.values():
         _inject_nop_sled(buf, pos, end)
@@ -356,10 +374,9 @@ def _patch_code(code):
                 common_depth = i
                 break
             
-        if has_params:            
+        if has_params:
             if temp_var is None:
-                temp_var = len(varnames)
-                varnames += ('goto.params',)
+                temp_var = data.add_var('goto.params')
             
             ops.append(('STORE_FAST', temp_var)) # must do this before any blocks are pushed/popped      
 
@@ -376,7 +393,7 @@ def _patch_code(code):
                     ops.append('POP_TOP')
                  # pypy 3.6 keeps a block around until END_FINALLY; python 3.8 reuses SETUP_FINALLY for SETUP_EXCEPT (where END_FINALLY is not accepted). What will pypy 3.8 do?
                 if _BYTECODE.pypy_finally_semantics and block in ('SETUP_FINALLY', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
-                    ops.append('BEGIN_FINALLY' if _BYTECODE.has_begin_finally else ('LOAD_CONST', get_const(None)))
+                    ops.append('BEGIN_FINALLY' if _BYTECODE.has_begin_finally else ('LOAD_CONST', data.get_const(None)))
                     ops.append('END_FINALLY')
         
         tuple_i = 0
@@ -387,33 +404,43 @@ def _patch_code(code):
                 if block != 'FOR_ITER':
                     ops.append((block, blockarg))
                 ops.append(('LOAD_FAST', temp_var))
-                ops.append(('LOAD_CONST', get_const(tuple_i)))
+                ops.append(('LOAD_CONST', data.get_const(tuple_i)))
                 ops.append('BINARY_SUBSCR')
                 tuple_i += 1
-                if block in ('SETUP_LOOP', 'FOR_ITER'):
-                    ops.append('GET_ITER') # ensure the stack item is an iter, to avoid FOR_ITER crashing. Side-effect: convert iterables to iterators
+                ops.append('GET_ITER') # this both converts iterables to iterators for convenience, and prevents FOR_ITER from crashing on non-iter objects. (this is a no-op for iterators)
+                    
+            elif block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
+                if not has_params:
+                    raise SyntaxError('Jump into block without the necessary params')
+                ops.append(('LOAD_FAST', temp_var))
+                ops.append(('LOAD_CONST', data.get_const(tuple_i)))
+                ops.append('BINARY_SUBSCR')
+                ops.append(('LOAD_ATTR', data.get_name('__exit__')))
+                # SETUP_WITH executes __enter__ and so is inappropriate here (a goto must bypass any and all side-effects)
+                ops.append(('SETUP_FINALLY', blockarg))
+                
             elif block in ('SETUP_EXCEPT', 'SETUP_FINALLY'):
                 ops.append((block, blockarg))
             elif block == '<FINALLY>':
                 if _BYTECODE.pypy_finally_semantics:
                     ops.append('SETUP_FINALLY')
                     ops.append('POP_BLOCK')
-                ops.append('BEGIN_FINALLY' if _BYTECODE.has_begin_finally else ('LOAD_CONST', get_const(None)))
+                ops.append('BEGIN_FINALLY' if _BYTECODE.has_begin_finally else ('LOAD_CONST', data.get_const(None)))
             elif block == '<EXCEPT>':
                 # we raise an exception to get the right block pushed
-                raise_ops = [('LOAD_CONST', get_const(None)), ('RAISE_VARARGS', 1)]
+                raise_ops = [('LOAD_CONST', data.get_const(None)), ('RAISE_VARARGS', 1)]
                 ops.append(('SETUP_EXCEPT' if _BYTECODE.has_setup_except else 'SETUP_FINALLY', _get_instructions_size(raise_ops))) 
                 ops += raise_ops
                 for _ in _range(3):
                     ops.append("POP_TOP") 
             else:
-                raise SyntaxError('Being worked on...')
+                _warn_bug("ignoring %s" % block)
                     
         ops.append(('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit))
         
         _inject_ops(buf, pos, end, ops)
 
-    new_code = _make_code(code, _array_to_bytes(buf), varnames, consts)
+    new_code = _make_code(code, _array_to_bytes(buf), data)
     
     _patched_code_cache[code] = new_code
     return new_code

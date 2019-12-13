@@ -179,6 +179,26 @@ def test_jump_into_2_loops_params_and_live():
 
     assert func() == (2, 11 + 6)
     
+def test_jump_out_then_back_in_for_loop_and_survive():
+    @with_goto
+    def func():
+        it1 = iter(range(5))
+        cc = 0
+        for i in it1:
+            it2 = iter(range(4))
+            for j in it2:
+                goto .out
+                raise None
+                label .back
+            
+        if NonConstFalse:
+            label .out
+            cc += 1
+            goto.params .back = it1, it2
+        return cc, i, j
+    
+    assert func() == (20, 4, 3)
+    
 def test_jump_out_of_nested_2_loops():
     @with_goto
     def func():
@@ -414,15 +434,69 @@ def test_jump_into_with_block():
 
     pytest.raises(SyntaxError, with_goto, func)
     
-"""def test_jump_into_with_block_with_params():
+def test_jump_into_with_block_with_params():
+    @with_goto
     def func():
         c = Context()
-        goto.params .block = c
+        goto.params .block = c,
         with 123 as c:
             label .block
         return c.data()
 
-    assert func() == (0, 1)"""
+    assert func() == (0, 1)
+    
+def test_jump_into_with_block_with_params_and_survive():
+    @with_goto
+    def func():
+        c = Context()
+        for i in range(10):
+            goto.params .block = c,
+            with 123 as c:
+                label .block
+        return i, c.data()
+
+    assert func() == (9, (0, 10))
+    
+def test_jump_into_with_block_with_bad_params():
+    @with_goto
+    def func():
+        with Context() as c:
+            label .block
+        goto.params .block = 123,
+
+    pytest.raises(AttributeError, func)
+    
+def test_jump_into_with_block_with_bad_exit_params():
+    class BadAttr:
+        __exit__ = 123
+    
+    @with_goto
+    def func():
+        with Context() as c:
+            label .block
+        goto.params .block = BadAttr,
+
+    pytest.raises(TypeError, func)
+    
+def test_jump_out_of_then_back_into_with_block_with_params_and_survive():
+    @with_goto
+    def func():
+        c = Context()
+        cc = 0
+        for i in range(10):
+            with c:
+                goto .out
+                cc -= 100
+                label .back
+                
+            if NonConstFalse:
+                label .out
+                cc += 1
+                goto.params .back = c,
+        
+        return i, cc, c.data()
+
+    assert func() == (9, 10, (10, 10))
 
 def test_generator():
     @with_goto
