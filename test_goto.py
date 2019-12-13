@@ -293,3 +293,15 @@ def test_function_is_copy():
 
     assert newfunc is not func
     assert newfunc.foo == 'bar'
+    
+def test_code_is_not_copy():
+    def outer_func():
+        @with_goto
+        def inner_func():
+            goto .test
+            label .test
+        return inner_func
+    
+    assert outer_func() is not outer_func()
+    assert outer_func().__code__ is outer_func().__code__
+    

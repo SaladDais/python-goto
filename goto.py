@@ -3,6 +3,7 @@ import struct
 import array
 import types
 import functools
+import weakref
 
 try:
     import __pypy__
@@ -47,6 +48,7 @@ class _Bytecode:
 
 _BYTECODE = _Bytecode()
 
+_patched_code_cache = weakref.WeakKeyDictionary()
 
 def _make_code(code, codestring):
     try:
@@ -195,6 +197,10 @@ def _inject_nop_sled(buf, pos, end):
 
 
 def _patch_code(code):
+    new_code = _patched_code_cache.get(code)
+    if new_code is not None:
+        return new_code
+    
     labels, gotos = _find_labels_and_gotos(code)
     buf = array.array('B', code.co_code)
 
@@ -243,7 +249,10 @@ def _patch_code(code):
             pos = _write_instructions(buf, pos, ops)
             _inject_nop_sled(buf, pos, end)
 
-    return _make_code(code, _array_to_bytes(buf))
+    new_code = _make_code(code, _array_to_bytes(buf))
+    
+    _patched_code_cache[code] = new_code
+    return new_code
 
 
 def with_goto(func_or_code):
