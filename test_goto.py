@@ -138,6 +138,45 @@ def test_jump_into_loop_bad_param_format():
 
     pytest.raises(TypeError, func)
     
+def test_jump_into_loop_params_with_index():
+    @with_goto
+    def func():
+        lst = []
+        i = -1
+        goto.into .loop = iter(range(5)),
+        for i in range(10):
+            label .loop
+            lst.append(i)
+        return lst
+
+    assert func() == [-1, 0, 1, 2, 3, 4]
+    
+def test_jump_into_loop_params_without_index():
+    @with_goto
+    def func():
+        lst = []
+        goto.into .loop = iter(range(5)),
+        for i in range(10):
+            label .loop
+            lst.append(i)
+        return lst
+
+    pytest.raises(UnboundLocalError, func)
+    
+def test_jump_into_2_loops_params_and_live():
+    @with_goto
+    def func():
+        for i in range(3):
+            c = 0 
+            goto.into .loop = iter(range(3)), iter(range(10))
+            for j in None:
+                for k in range(2):
+                    label .loop
+                    c += 1
+        return i, c
+
+    assert func() == (2, 11 + 6)
+    
 def test_jump_out_of_nested_2_loops():
     @with_goto
     def func():
