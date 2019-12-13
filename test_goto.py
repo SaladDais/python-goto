@@ -100,6 +100,20 @@ def test_jump_out_of_nested_2_loops():
 
     assert func() == (0, 0)
 
+def test_jump_out_of_nested_4_loops_and_survive():
+    @with_goto
+    def func():
+        for i in range(2):
+            for j in range(2):
+                for k in range(2):
+                    for m in range(2):
+                        for n in range(2):
+                            goto .end
+            label .end
+        return (i, j, k, m, n)
+
+    assert func() == (1, 0, 0, 0, 0)
+
 def test_jump_out_of_nested_11_loops():
     @with_goto
     def func():
@@ -158,6 +172,39 @@ def test_jump_out_of_try_block():
         return rv
 
     assert func() == None
+
+def test_jump_out_of_try_block_and_survive():
+    @with_goto
+    def func():
+        for i in range(10):
+            try:
+                rv = None
+                goto .end
+            except:
+                rv = 'except'
+            finally:
+                rv = 'finally'
+            label .end
+        return (i, rv)
+
+    assert func() == (9, None)
+
+def test_jump_out_of_try_block_and_live():
+    @with_goto
+    def func():
+        for i in range(3):
+            for j in range(3):
+                try:
+                    rv = None
+                    goto .end
+                except:
+                    rv = 'except'
+                finally:
+                    rv = 'finally'
+                label .end
+        return (i, j, rv)
+
+    assert func() == (2, 2, None)
 
 def test_jump_into_try_block():
     def func():
