@@ -4,6 +4,7 @@ import array
 import types
 import functools
 import weakref
+import warnings
 
 try:
     import __pypy__
@@ -74,7 +75,7 @@ def _make_code(code, codestring):
         return types.CodeType(*args)
 
 
-def _parse_instructions(code):
+def _parse_instructions(code, yield_nones_at_end=0):
     extended_arg = 0
     extended_arg_offset = None
     pos = 0
@@ -100,6 +101,9 @@ def _parse_instructions(code):
         extended_arg = 0
         extended_arg_offset = None
         yield (dis.opname[opcode], oparg, offset)
+        
+    for _ in range(yield_nones_at_end):
+        yield (None, None, None)
 
 def _get_instruction_size(opname, oparg=0):
     size = 1
@@ -157,6 +161,9 @@ def _write_instructions(buf, pos, ops):
             pos = _write_instruction(buf, pos, *op)
     return pos
 
+def _warn_bug(msg):
+    warnings.warn("Internal error detected - result of with_goto may be incorrect. (%s)" % msg)
+
 def _find_labels_and_gotos(code):
     labels = {}
     gotos = []
@@ -168,8 +175,14 @@ def _find_labels_and_gotos(code):
     opname1 = oparg1 = offset1 = None
     opname2 = oparg2 = offset2 = None
     opname3 = oparg3 = offset3 = None
+    
+    def pop_block():
+        if block_stack:
+            block_stack.pop()
+        else:
+            _warn_bug("can't pop block")
 
-    for opname4, oparg4, offset4 in _parse_instructions(code.co_code):
+    for opname4, oparg4, offset4 in _parse_instructions(code.co_code, 3):
         if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
             if opname2 == 'LOAD_ATTR' and opname3 == 'POP_TOP':
                 name = code.co_names[oparg1]
@@ -194,15 +207,18 @@ def _find_labels_and_gotos(code):
             block_counter += 1
             block_stack.append((opname1, block_counter))
             block_exits.append(offset1 + oparg1)
-        elif opname1 == 'POP_BLOCK' and block_stack:
-            block_stack.pop()
-        elif block_exits and offset1 == block_exits[-1] and block_stack:
-            block_stack.pop()
+        elif opname1 == 'POP_BLOCK':
+            pop_block()
+        elif block_exits and offset1 == block_exits[-1]:
+            pop_block()
             block_exits.pop()
 
         opname1, oparg1, offset1 = opname2, oparg2, offset2
         opname2, oparg2, offset2 = opname3, oparg3, offset3
         opname3, oparg3, offset3 = opname4, oparg4, offset4
+
+    if block_stack:
+        _warn_bug("block stack not empty")
 
     return labels, gotos
 
@@ -239,7 +255,10 @@ def _patch_code(code):
                 ops.append('POP_TOP')
             else:
                 ops.append('POP_BLOCK')
-                if __pypy__ and block == 'SETUP_FINALLY': # pypy 3.6 keep a block around until END_FINALLY; python 3.8 reuses SETUP_FINALLY for SETUP_EXCEPT. What will pypy 3.8 do?
+                if block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
+                    ops.append('POP_TOP')
+                 # pypy 3.6 keeps a block around until END_FINALLY; python 3.8 reuses SETUP_FINALLY for SETUP_EXCEPT (where END_FINALLY is not accepted). What will pypy 3.8 do?
+                if __pypy__ and block in ('SETUP_FINALLY', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
                     ops.append(('LOAD_CONST', code.co_consts.index(None)))
                     ops.append('END_FINALLY')
         ops.append(('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit))

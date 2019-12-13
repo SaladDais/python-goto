@@ -75,6 +75,19 @@ def test_jump_out_of_loop_and_survive():
     assert func() == (9, 0)
 
 
+def test_jump_out_of_loop_and_live():
+    @with_goto
+    def func():
+        for i in range(10):
+            for j in range(10):
+                for k in range(10):
+                    goto .end
+            label .end
+        return (i, j, k)
+
+    assert func() == (9, 0, 0)
+
+
 def test_jump_into_loop():
     def func():
         for i in range(10):
@@ -157,6 +170,41 @@ def test_jump_across_loops():
 
     pytest.raises(SyntaxError, with_goto, func)
 
+class Context:
+    def __init__(self):
+        self.enters = 0
+        self.exits = 0
+    def __enter__(self):
+        self.enters += 1
+        return self
+    def __exit__(self, a, b, c):
+        self.exits += 1
+        return self
+    def data(self):
+        return (self.enters, self.exits)
+
+def test_jump_out_of_with_block():
+    @with_goto
+    def func():
+        with Context() as c:
+            goto .out
+        label .out
+        return c.data()
+        
+    assert func()== (1, 0)
+
+def test_jump_out_of_with_block_and_live():
+    @with_goto
+    def func():
+        c = Context()
+        for i in range(3):
+            for j in range(3):
+                with c:
+                    goto .out
+            label .out
+        return (i, j, c.data())
+        
+    assert func() == (2, 0, (3, 0))
 
 def test_jump_out_of_try_block():
     @with_goto
