@@ -4,6 +4,10 @@ import array
 import types
 import functools
 
+try:
+    import __pypy__
+except:
+    __pypy__ = None
 
 try:
     _array_to_bytes = array.array.tobytes
@@ -208,11 +212,14 @@ def _patch_code(code):
             raise SyntaxError('Jump into different block')
         
         ops = []
-        for block, _ in origin_stack[target_depth:]:
+        for block, _ in reversed(origin_stack[target_depth:]):
             if block == 'FOR_ITER':
                 ops.append('POP_TOP')
             else:
                 ops.append('POP_BLOCK')
+                if __pypy__ and block == 'SETUP_FINALLY': # pypy 3.6 keep a block around until END_FINALLY; python 3.8 reuses SETUP_FINALLY for SETUP_EXCEPT. What will pypy 3.8 do?
+                    ops.append(('LOAD_CONST', code.co_consts.index(None)))
+                    ops.append('END_FINALLY')
         ops.append(('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit))
         
         if pos + _get_instructions_size(ops) > end:
