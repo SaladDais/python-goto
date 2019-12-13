@@ -100,6 +100,15 @@ def _get_instruction_size(opname, oparg=0):
 
     return size
 
+def _get_instructions_size(ops):
+    size = 0
+    for op in ops:
+        if isinstance(op, str):
+            size += _get_instruction_size(op)
+        else:
+            size += _get_instruction_size(*op)
+    return size
+
 def _write_instruction(buf, pos, opname, oparg=0):
     extended_arg = oparg >> _BYTECODE.argument_bits
     if extended_arg != 0:
@@ -116,6 +125,13 @@ def _write_instruction(buf, pos, opname, oparg=0):
 
     return pos
 
+def _write_instructions(buf, pos, ops):
+    for op in ops:
+        if isinstance(op, str):
+            pos = _write_instruction(buf, pos, op)
+        else:
+            pos = _write_instruction(buf, pos, *op)
+    return pos
 
 def _find_labels_and_gotos(code):
     labels = {}
@@ -178,35 +194,28 @@ def _patch_code(code):
         if origin_stack[:target_depth] != target_stack:
             raise SyntaxError('Jump into different block')
 
-        size = 0
+        ops = []
         for i in range(len(origin_stack) - target_depth):
-            size += _get_instruction_size('POP_BLOCK')
-        size += _get_instruction_size('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit)
+            ops.append('POP_BLOCK')
+        ops.append(('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit))
 
-        moved_to_end = False
-        if pos + size > end:
-            # not enough space, add at end
-            pos = _write_instruction(buf, pos, 'JUMP_ABSOLUTE', len(buf) // _BYTECODE.jump_unit)
+        if pos + _get_instructions_size(ops) > end:
+            # not enough space, add code at buffer end and jump there
+            buf_end = len(buf)
 
-            if pos > end:
-                raise SyntaxError('Goto in an incredibly huge function') # not sure if reachable
+            go_to_end_ops = [('JUMP_ABSOLUTE', buf_end // _BYTECODE.jump_unit)]
 
-            size += _get_instruction_size('JUMP_ABSOLUTE', end // _BYTECODE.jump_unit)
+            if pos + _get_instructions_size(go_to_end_ops) > end:
+                # not sure if reachable
+                raise SyntaxError('Goto in an incredibly huge function')
 
-            moved_to_end = True
-            pos = len(buf)
-            buf.extend([0] * size)
+            pos = _write_instructions(buf, pos, go_to_end_ops)
+            _inject_nop_sled(buf, pos, end)
 
-        try:
-            for i in range(len(origin_stack) - target_depth):
-                pos = _write_instruction(buf, pos, 'POP_BLOCK')
-            pos = _write_instruction(buf, pos, 'JUMP_ABSOLUTE', target // _BYTECODE.jump_unit)
-        except (IndexError, struct.error) as e:
-            raise SyntaxError("Internal error")
-
-        if moved_to_end:
-            pos = _write_instruction(buf, pos, 'JUMP_ABSOLUTE', end // _BYTECODE.jump_unit)
+            buf.extend([0] * _get_instructions_size(ops))
+            _write_instructions(buf, buf_end, ops)
         else:
+            pos = _write_instructions(buf, pos, ops)
             _inject_nop_sled(buf, pos, end)
 
     return _make_code(code, _array_to_bytes(buf))
