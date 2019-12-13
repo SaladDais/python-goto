@@ -366,6 +366,8 @@ def _patch_code(code):
                     ops.append(('LOAD_CONST', get_const(tuple_i)))
                     ops.append('BINARY_SUBSCR')
                     tuple_i += 1
+                    if block in ('SETUP_LOOP', 'FOR_ITER'):
+                        ops.append('GET_ITER') # ensure the stack item is an iter, to avoid FOR_ITER crashing. Side-effect: convert iterables to iterators
                 else:
                     raise SyntaxError('Being worked on...')
                     

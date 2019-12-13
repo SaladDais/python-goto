@@ -97,15 +97,46 @@ def test_jump_into_loop():
     pytest.raises(SyntaxError, with_goto, func)
 
 
-def test_jump_into_loop_params():
+def test_jump_into_loop_iter_params():
     @with_goto
     def func():
-        goto.into .loop = iter(range(5)),
+        my_iter = iter(range(5))
+        goto.into .loop = my_iter,
+        for i in range(10):
+            label .loop
+        return i, sum(1 for _ in my_iter)
+
+    assert func() == (4, 0)
+
+def test_jump_into_loop_iterable_params(): # wasn't planned on being accepted, but works due to an implemenation detail
+    @with_goto
+    def func():
+        goto.into .loop = range(5),
         for i in range(10):
             label .loop
         return i
 
     assert func() == 4
+
+def test_jump_into_loop_bad_params():
+    @with_goto
+    def func():
+        goto.into .loop = 1,
+        for i in range(10):
+            label .loop
+        return i
+
+    pytest.raises(TypeError, func)
+    
+def test_jump_into_loop_bad_param_format():
+    @with_goto
+    def func():
+        goto.into .loop = iter(range(5))
+        for i in range(10):
+            label .loop
+        return i
+
+    pytest.raises(TypeError, func)
     
 def test_jump_out_of_nested_2_loops():
     @with_goto
