@@ -247,14 +247,15 @@ def _find_labels_and_gotos(code):
                                       offset4,
                                       oparg2,
                                       list(block_stack),
-                                      False))
+                                      0))
                 elif opname2 == 'LOAD_ATTR' and opname3 == 'STORE_ATTR':
-                    if code.co_names[oparg1] == 'goto' and code.co_names[oparg2] == 'params':
+                    if code.co_names[oparg1] == 'goto' and code.co_names[oparg2] in ('param', 'params'):
                         gotos.append((offset1,
                                       offset4,
                                       oparg3,
                                       list(block_stack),
-                                      True))
+                                      code.co_names[oparg2]))
+                        
             elif opname1 in ('SETUP_LOOP',
                              'SETUP_EXCEPT', 'SETUP_FINALLY',
                              'SETUP_WITH', 'SETUP_ASYNC_WITH'):
@@ -266,6 +267,7 @@ def _find_labels_and_gotos(code):
             elif not _BYTECODE.has_loop_blocks and opname1 == 'FOR_ITER':
                 block_counter = push_block(opname1, oparg1)
                 for_exits.append(endoffset1 + oparg1)
+                
             elif opname1 == 'POP_BLOCK':
                 last_block = pop_block()
             elif opname1 == 'POP_EXCEPT':
@@ -360,7 +362,7 @@ def _patch_code(code):
     for pos, end, _ in labels.values():
         _inject_nop_sled(buf, pos, end)
 
-    for pos, end, label, origin_stack, has_params in gotos:
+    for pos, end, label, origin_stack, params in gotos:
         try:
             _, target, target_stack = labels[label]
         except KeyError:
@@ -374,11 +376,12 @@ def _patch_code(code):
                 common_depth = i
                 break
             
-        if has_params:
+        if params:
             if temp_var is None:
-                temp_var = data.add_var('goto.params')
+                temp_var = data.add_var('goto.temp')
             
-            ops.append(('STORE_FAST', temp_var)) # must do this before any blocks are pushed/popped      
+            ops.append(('STORE_FAST', temp_var)) # must do this before any blocks are pushed/popped
+            many_params = (params != 'param')
 
         for block, _, _ in reversed(origin_stack[common_depth:]):
             if block == 'FOR_ITER':
@@ -398,26 +401,23 @@ def _patch_code(code):
         
         tuple_i = 0
         for block, blockarg, _ in target_stack[common_depth:]:
-            if block in ('SETUP_LOOP', 'FOR_ITER'):
-                if not has_params:
+            if block in ('SETUP_LOOP', 'FOR_ITER',
+                         'SETUP_WITH', 'SETUP_ASYNC_WITH'):
+                if not params:
                     raise SyntaxError('Jump into block without the necessary params')
-                if block != 'FOR_ITER':
+                if block == 'SETUP_LOOP':
                     ops.append((block, blockarg))
                 ops.append(('LOAD_FAST', temp_var))
-                ops.append(('LOAD_CONST', data.get_const(tuple_i)))
-                ops.append('BINARY_SUBSCR')
-                tuple_i += 1
-                ops.append('GET_ITER') # this both converts iterables to iterators for convenience, and prevents FOR_ITER from crashing on non-iter objects. (this is a no-op for iterators)
-                    
-            elif block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
-                if not has_params:
-                    raise SyntaxError('Jump into block without the necessary params')
-                ops.append(('LOAD_FAST', temp_var))
-                ops.append(('LOAD_CONST', data.get_const(tuple_i)))
-                ops.append('BINARY_SUBSCR')
-                ops.append(('LOAD_ATTR', data.get_name('__exit__')))
-                # SETUP_WITH executes __enter__ and so is inappropriate here (a goto must bypass any and all side-effects)
-                ops.append(('SETUP_FINALLY', blockarg))
+                if many_params:
+                    ops.append(('LOAD_CONST', data.get_const(tuple_i)))
+                    ops.append('BINARY_SUBSCR')
+                tuple_i += 1                
+                if block in ('SETUP_LOOP', 'FOR_ITER'):
+                    ops.append('GET_ITER') # this both converts iterables to iterators for convenience, and prevents FOR_ITER from crashing on non-iter objects. (this is a no-op for iterators)
+                elif block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
+                    # SETUP_WITH executes __enter__ and so would be inappropriate (a goto must bypass any and all side-effects)
+                    ops.append(('LOAD_ATTR', data.get_name('__exit__')))
+                    ops.append(('SETUP_FINALLY', blockarg))
                 
             elif block in ('SETUP_EXCEPT', 'SETUP_FINALLY'):
                 ops.append((block, blockarg))

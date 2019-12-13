@@ -99,6 +99,17 @@ def test_jump_into_loop():
     pytest.raises(SyntaxError, with_goto, func)
 
 
+def test_jump_into_loop_iter_param():
+    @with_goto
+    def func():
+        my_iter = iter(range(5))
+        goto.param .loop = my_iter
+        for i in range(10):
+            label .loop
+        return i, sum(1 for _ in my_iter)
+
+    assert func() == (4, 0)
+
 def test_jump_into_loop_iter_params():
     @with_goto
     def func():
@@ -110,10 +121,10 @@ def test_jump_into_loop_iter_params():
 
     assert func() == (4, 0)
 
-def test_jump_into_loop_iterable_params(): # wasn't planned on being accepted, but works due to an implementation detail, and... probably for the best
+def test_jump_into_loop_iterable_param(): # wasn't planned on being accepted, but works due to an implementation detail, and... probably for the best
     @with_goto
     def func():
-        goto.params .loop = range(5),
+        goto.param .loop = range(5)
         for i in range(10):
             label .loop
         return i
@@ -123,14 +134,14 @@ def test_jump_into_loop_iterable_params(): # wasn't planned on being accepted, b
 def test_jump_into_loop_bad_params():
     @with_goto
     def func():
-        goto.params .loop = 1,
+        goto.param .loop = 1
         for i in range(10):
             label .loop
         return i
 
     pytest.raises(TypeError, func)
     
-def test_jump_into_loop_bad_param_format():
+def test_jump_into_loop_params_not_seq():
     @with_goto
     def func():
         goto.params .loop = iter(range(5))
@@ -140,12 +151,12 @@ def test_jump_into_loop_bad_param_format():
 
     pytest.raises(TypeError, func)
     
-def test_jump_into_loop_params_with_index():
+def test_jump_into_loop_param_with_index():
     @with_goto
     def func():
         lst = []
         i = -1
-        goto.params .loop = iter(range(5)),
+        goto.param .loop = iter(range(5))
         for i in range(10):
             label .loop
             lst.append(i)
@@ -153,11 +164,11 @@ def test_jump_into_loop_params_with_index():
 
     assert func() == [-1, 0, 1, 2, 3, 4]
     
-def test_jump_into_loop_params_without_index():
+def test_jump_into_loop_param_without_index():
     @with_goto
     def func():
         lst = []
-        goto.params .loop = iter(range(5)),
+        goto.param .loop = iter(range(5))
         for i in range(10):
             label .loop
             lst.append(i)
@@ -338,11 +349,11 @@ def test_jump_across_loops():
 
     pytest.raises(SyntaxError, with_goto, func)
 
-def test_jump_across_loops_with_params():
+def test_jump_across_loops_with_param():
     @with_goto
     def func():
         for i in range(10):
-            goto.params .other_loop = iter(range(3)),
+            goto.param .other_loop = iter(range(3))
 
         for i in range(10):
             label .other_loop
@@ -351,13 +362,13 @@ def test_jump_across_loops_with_params():
 
     assert func() == 2
 
-def test_jump_across_loops_with_params_and_live():
+def test_jump_across_loops_with_param_and_live():
     @with_goto
     def func():
         for i in range(5):
             for j in range(10):
                 for k in range(10):
-                    goto.params .other_loop = iter(range(3)),
+                    goto.param .other_loop = iter(range(3))
     
             for j in range(10):
                 label .other_loop
@@ -434,6 +445,17 @@ def test_jump_into_with_block():
 
     pytest.raises(SyntaxError, with_goto, func)
     
+def test_jump_into_with_block_with_param():
+    @with_goto
+    def func():
+        c = Context()
+        goto.param .block = c
+        with 123 as c:
+            label .block
+        return c.data()
+
+    assert func() == (0, 1)
+    
 def test_jump_into_with_block_with_params():
     @with_goto
     def func():
@@ -450,7 +472,7 @@ def test_jump_into_with_block_with_params_and_survive():
     def func():
         c = Context()
         for i in range(10):
-            goto.params .block = c,
+            goto.param .block = c
             with 123 as c:
                 label .block
         return i, c.data()
@@ -462,7 +484,7 @@ def test_jump_into_with_block_with_bad_params():
     def func():
         with Context() as c:
             label .block
-        goto.params .block = 123,
+        goto.param .block = 123
 
     pytest.raises(AttributeError, func)
     
@@ -474,7 +496,7 @@ def test_jump_into_with_block_with_bad_exit_params():
     def func():
         with Context() as c:
             label .block
-        goto.params .block = BadAttr,
+        goto.param .block = BadAttr
 
     pytest.raises(TypeError, func)
     
@@ -492,11 +514,34 @@ def test_jump_out_of_then_back_into_with_block_with_params_and_survive():
             if NonConstFalse:
                 label .out
                 cc += 1
-                goto.params .back = c,
+                goto.param .back = c
         
         return i, cc, c.data()
 
     assert func() == (9, 10, (10, 10))
+    
+def test_jump_out_of_then_back_into_2_nested_with_blocks_with_params_and_survive():
+    @with_goto
+    def func():
+        c1 = Context()
+        c2 = Context()
+        cc = 0
+        for i in range(11):
+            with c1:
+                if i != 10:
+                    with c2:
+                        goto .out
+                        cc -= 100
+                        label .back
+                
+            if NonConstFalse:
+                label .out
+                cc += 1
+                goto.params .back = c1, c2
+        
+        return i, cc, c1.data(), c2.data()
+
+    assert func() == (10, 10, (11, 11), (10, 10))
 
 def test_generator():
     @with_goto
