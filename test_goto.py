@@ -88,45 +88,6 @@ def test_jump_out_of_nested_2_loops():
 
     assert func() == (0, 0)
 
-def test_jump_out_of_nested_3_loops():
-    @with_goto
-    def func():
-        for i in range(2):
-            for j in range(2):
-                for k in range(2):
-                    goto .end
-        label .end
-        return (i, j, k)
-
-    assert func() == (0, 0, 0)
-
-def test_jump_out_of_nested_4_loops():
-    @with_goto
-    def func():
-        for i in range(2):
-            for j in range(2):
-                for k in range(2):
-                    for m in range(2):
-                        goto .end
-        label .end
-        return (i, j, k, m)
-
-    assert func() == (0, 0, 0, 0)
-
-def test_jump_out_of_nested_5_loops():
-    @with_goto
-    def func():
-        for i in range(2):
-            for j in range(2):
-                for k in range(2):
-                    for m in range(2):
-                        for n in range(2):
-                            goto .end
-        label .end
-        return (i, j, k, m, n)
-
-    assert func() == (0, 0, 0, 0, 0)
-
 def test_jump_out_of_nested_11_loops():
     @with_goto
     def func():
@@ -142,11 +103,18 @@ def test_jump_out_of_nested_11_loops():
                                         for i9 in range(2):
                                             for i10 in range(2):
                                                 for i11 in range(2):
-                                                    # These are more than 256 bytes of bytecode
-                                                    x += x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x
-                                                    x += x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x
-                                                    x += x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x+x
-                                    
+                                                    # These are more than
+                                                    # 256 bytes of bytecode
+                                                    x += (x+x+x+x+x+x+x+x+x+
+                                                          x+x+x+x+x+x+x+x+x+
+                                                          x+x+x+x+x+x+x+x+x)
+                                                    x += (x+x+x+x+x+x+x+x+x+
+                                                          x+x+x+x+x+x+x+x+x+
+                                                          x+x+x+x+x+x+x+x+x)
+                                                    x += (x+x+x+x+x+x+x+x+x+
+                                                          x+x+x+x+x+x+x+x+x+
+                                                          x+x+x+x+x+x+x+x+x)
+
                                                     goto .end
         label .end
         return (i1, i2, i3, i4, i5, i6, i7, i8, i9, i10, i11)

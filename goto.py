@@ -88,17 +88,17 @@ def _parse_instructions(code):
 
 def _get_instruction_size(opname, oparg=0):
     size = 1
-    
+
     extended_arg = oparg >> _BYTECODE.argument_bits
     if extended_arg != 0:
         size += _get_instruction_size('EXTENDED_ARG', extended_arg)
         oparg &= (1 << _BYTECODE.argument_bits) - 1
-    
+
     opcode = dis.opmap[opname]
-    if opcode >= _BYTECODE.have_argument:    
+    if opcode >= _BYTECODE.have_argument:
         size += _BYTECODE.argument.size
-        
-    return size    
+
+    return size
 
 def _write_instruction(buf, pos, opname, oparg=0):
     extended_arg = oparg >> _BYTECODE.argument_bits
@@ -177,22 +177,22 @@ def _patch_code(code):
         target_depth = len(target_stack)
         if origin_stack[:target_depth] != target_stack:
             raise SyntaxError('Jump into different block')
-        
+
         size = 0
         for i in range(len(origin_stack) - target_depth):
             size += _get_instruction_size('POP_BLOCK')
         size += _get_instruction_size('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit)
-        
+
         moved_to_end = False
         if pos + size > end:
             # not enough space, add at end
             pos = _write_instruction(buf, pos, 'JUMP_ABSOLUTE', len(buf) // _BYTECODE.jump_unit)
-            
+
             if pos > end:
                 raise SyntaxError('Goto in an incredibly huge function') # not sure if reachable
-            
+
             size += _get_instruction_size('JUMP_ABSOLUTE', end // _BYTECODE.jump_unit)
-            
+
             moved_to_end = True
             pos = len(buf)
             buf.extend([0] * size)
@@ -202,11 +202,10 @@ def _patch_code(code):
                 pos = _write_instruction(buf, pos, 'POP_BLOCK')
             pos = _write_instruction(buf, pos, 'JUMP_ABSOLUTE', target // _BYTECODE.jump_unit)
         except (IndexError, struct.error) as e:
-            raise SyntaxError("Internal error", e)
-            
+            raise SyntaxError("Internal error")
+
         if moved_to_end:
             pos = _write_instruction(buf, pos, 'JUMP_ABSOLUTE', end // _BYTECODE.jump_unit)
-            
         else:
             _inject_nop_sled(buf, pos, end)
 
