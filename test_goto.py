@@ -101,17 +101,17 @@ def test_jump_into_loop_iter_params():
     @with_goto
     def func():
         my_iter = iter(range(5))
-        goto.into .loop = my_iter,
+        goto.params .loop = my_iter,
         for i in range(10):
             label .loop
         return i, sum(1 for _ in my_iter)
 
     assert func() == (4, 0)
 
-def test_jump_into_loop_iterable_params(): # wasn't planned on being accepted, but works due to an implemenation detail
+def test_jump_into_loop_iterable_params(): # wasn't planned on being accepted, but works due to an implementation detail, and... probably for the best
     @with_goto
     def func():
-        goto.into .loop = range(5),
+        goto.params .loop = range(5),
         for i in range(10):
             label .loop
         return i
@@ -121,7 +121,7 @@ def test_jump_into_loop_iterable_params(): # wasn't planned on being accepted, b
 def test_jump_into_loop_bad_params():
     @with_goto
     def func():
-        goto.into .loop = 1,
+        goto.params .loop = 1,
         for i in range(10):
             label .loop
         return i
@@ -131,7 +131,7 @@ def test_jump_into_loop_bad_params():
 def test_jump_into_loop_bad_param_format():
     @with_goto
     def func():
-        goto.into .loop = iter(range(5))
+        goto.params .loop = iter(range(5))
         for i in range(10):
             label .loop
         return i
@@ -143,7 +143,7 @@ def test_jump_into_loop_params_with_index():
     def func():
         lst = []
         i = -1
-        goto.into .loop = iter(range(5)),
+        goto.params .loop = iter(range(5)),
         for i in range(10):
             label .loop
             lst.append(i)
@@ -155,7 +155,7 @@ def test_jump_into_loop_params_without_index():
     @with_goto
     def func():
         lst = []
-        goto.into .loop = iter(range(5)),
+        goto.params .loop = iter(range(5)),
         for i in range(10):
             label .loop
             lst.append(i)
@@ -168,7 +168,7 @@ def test_jump_into_2_loops_params_and_live():
     def func():
         for i in range(3):
             c = 0 
-            goto.into .loop = iter(range(3)), iter(range(10))
+            goto.params .loop = iter(range(3)), iter(range(10))
             for j in None:
                 for k in range(2):
                     label .loop
@@ -287,7 +287,7 @@ def test_jump_across_loops_with_params():
     @with_goto
     def func():
         for i in range(10):
-            goto.into .other_loop = iter(range(3)),
+            goto.params .other_loop = iter(range(3)),
 
         for i in range(10):
             label .other_loop
@@ -302,7 +302,7 @@ def test_jump_across_loops_with_params_and_live():
         for i in range(5):
             for j in range(10):
                 for k in range(10):
-                    goto.into .other_loop = iter(range(3)),
+                    goto.params .other_loop = iter(range(3)),
     
             for j in range(10):
                 label .other_loop
@@ -316,7 +316,7 @@ def test_jump_into_with_unneeded_params_and_live():
     def func():
         for i in range(10):
             j = 0
-            goto.into .not_loop = ()
+            goto.params .not_loop = ()
             j = 1
             label .not_loop
         return (i, j)
@@ -366,6 +366,16 @@ def test_jump_into_with_block():
         goto .block
 
     pytest.raises(SyntaxError, with_goto, func)
+    
+"""def test_jump_into_with_block_with_params():
+    def func():
+        c = Context()
+        goto.params .block = c
+        with 123 as c:
+            label .block
+        return c.data()
+
+    assert func() == (0, 1)"""
 
 def test_generator():
     @with_goto
@@ -472,16 +482,34 @@ def test_jump_out_of_except_block_and_live():
 
     assert func() == (2, 0, 'except')
 
-"""def test_jump_into_except_block():
+def test_jump_into_except_block():
+    @with_goto
     def func():
+        i = 1
+        goto .block
         try:
-            pass
+            i = 2
         except:
             label .block
-            pass
-        goto .block
-
-    pytest.raises(SyntaxError, with_goto, func)"""
+            i = 3
+        return i
+            
+    assert func() == 3
+    
+def test_jump_into_except_block_and_live():
+    @with_goto
+    def func():
+        for i in range(10):
+            j = 1
+            goto .block
+            try:
+                j = 2
+            except:
+                label .block
+                j = 3
+        return i, j
+            
+    assert func() == (9, 3) 
 
 def test_jump_out_of_finally_block():
     @with_goto
@@ -539,6 +567,34 @@ def test_jump_out_of_try_in_except_in_finally_and_live():
 
     assert func() == (2, 0, 'try')
 
+def test_jump_into_finally_block():
+    @with_goto
+    def func():
+        rv = 1
+        goto .fin
+        try:
+            rv = 1 / 0
+        finally:
+            label .fin
+            rv = 2
+        return rv
+
+    assert func() == 2
+
+def test_jump_into_finally_block_and_live():
+    @with_goto
+    def func():
+        for i in range(3):
+            rv = 1
+            goto .fin
+            try:
+                rv = 1 / 0
+            finally:
+                label .fin
+                rv = 2
+        return i, rv
+
+    assert func() == (2, 2)
 
 def test_jump_to_unknown_label():
     def func():
@@ -546,6 +602,40 @@ def test_jump_to_unknown_label():
 
     pytest.raises(SyntaxError, with_goto, func)
 
+
+def test_jump_with_for_break(): # to see it doesn't confuse parser
+    @with_goto
+    def func():
+        for i in range(4):
+            goto .x
+            break
+        label .x
+        return i
+    
+    assert func() == 0
+    
+def test_jump_with_for_continue(): # to see it doesn't confuse parser
+    @with_goto
+    def func():
+        for i in range(4):
+            goto .x
+            continue
+        label .x
+        return i
+    
+    assert func() == 0
+    
+def test_jump_with_for_return(): # to see it doesn't confuse parser
+    @with_goto
+    def func():
+        for i in range(4):
+            goto .x
+            return
+        label .x
+        return i
+    
+    assert func() == 0
+    
 
 def test_function_is_copy():
     def func():

@@ -7,11 +7,6 @@ import weakref
 import warnings
 
 try:
-    import __pypy__
-except:
-    __pypy__ = None
-
-try:
     _array_to_bytes = array.array.tobytes
 except AttributeError:
     _array_to_bytes = array.array.tostring
@@ -48,6 +43,13 @@ class _Bytecode:
         self.has_pop_except = 'POP_EXCEPT' in dis.opmap
         self.has_setup_with = 'SETUP_WITH' in dis.opmap
         self.has_setup_except = 'SETUP_EXCEPT' in dis.opmap
+        self.has_begin_finally = 'BEGIN_FINALLY' in dis.opmap
+        
+        try:
+            import __pypy__
+            self.pypy_finally_semantics = True
+        except:
+            self.pypy_finally_semantics = False
 
     @property
     def argument_bits(self):
@@ -211,60 +213,71 @@ def _find_labels_and_gotos(code):
             else:
                 _warn_bug("mismatched block type")
         pop_block()
+        
+    jump_targets = set(dis.findlabels(code.co_code))
+    dead = False
 
     for opname4, oparg4, offset4 in _parse_instructions(code.co_code, 3):
-        # check for special opcodes
-        if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
-            if opname2 == 'LOAD_ATTR' and opname3 == 'POP_TOP':
-                name = code.co_names[oparg1]
-                if name == 'label':
-                    labels[oparg2] = (offset1,
-                                      offset4,
-                                      list(block_stack))
-                elif name == 'goto':
-                    gotos.append((offset1,
-                                  offset4,
-                                  oparg2,
-                                  list(block_stack),
-                                  False))
-            elif opname2 == 'LOAD_ATTR' and opname3 == 'STORE_ATTR':
-                if code.co_names[oparg1] == 'goto' and code.co_names[oparg2] == 'into':
-                    gotos.append((offset1,
-                                  offset4,
-                                  oparg3,
-                                  list(block_stack),
-                                  True))
-        elif opname1 in ('SETUP_LOOP',
-                         'SETUP_EXCEPT', 'SETUP_FINALLY',
-                         'SETUP_WITH', 'SETUP_ASYNC_WITH'):
-            block_counter = push_block(opname1, oparg1)
-            if opname1 == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
-                excepts.append(offset1 + oparg1)
-            elif opname1 == 'SETUP_FINALLY':
-                finallies.append(offset1 + oparg1)
-        elif not _BYTECODE.has_loop_blocks and opname1 == 'FOR_ITER':
-            block_counter = push_block(opname1, oparg1)
-            for_exits.append(offset1 + oparg1)
-        elif opname1 == 'POP_BLOCK':
-            pop_block()
-        elif opname1 == 'POP_EXCEPT':
-            pop_block_of_type('<EXCEPT>')
-        elif opname1 == 'END_FINALLY':
-            if opname0 != 'JUMP_FORWARD': # hack for dummy end-finally in except block (correct fix would be a jump-aware reading of instructions!)
-                pop_block_of_type('<FINALLY>')
-        elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START') and _BYTECODE.has_setup_with:
-            block_counter = push_block('<FINALLY>') # temporary block to match END_FINALLY
+        if offset1 in jump_targets:
+            dead = False
+        
+        if not dead:
+            endoffset1 = offset2
+                
+            # check for special offsets
+            if for_exits and offset1 == for_exits[-1]:
+                pop_block()
+                for_exits.pop()
+            if excepts and offset1 == excepts[-1]:
+                block_counter = push_block('<EXCEPT>')
+                excepts.pop()
+            if finallies and offset1 == finallies[-1]:
+                block_counter = push_block('<FINALLY>')
+                finallies.pop()
             
-        # check for special offsets
-        if for_exits and offset1 == for_exits[-1]:
-            pop_block()
-            for_exits.pop()
-        if excepts and offset1 == excepts[-1]:
-            block_counter = push_block('<EXCEPT>')
-            excepts.pop()
-        if finallies and offset1 == finallies[-1]:
-            block_counter = push_block('<FINALLY>')
-            finallies.pop()
+            # check for special opcodes
+            if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
+                if opname2 == 'LOAD_ATTR' and opname3 == 'POP_TOP':
+                    name = code.co_names[oparg1]
+                    if name == 'label':
+                        labels[oparg2] = (offset1,
+                                          offset4,
+                                          list(block_stack))
+                    elif name == 'goto':
+                        gotos.append((offset1,
+                                      offset4,
+                                      oparg2,
+                                      list(block_stack),
+                                      False))
+                elif opname2 == 'LOAD_ATTR' and opname3 == 'STORE_ATTR':
+                    if code.co_names[oparg1] == 'goto' and code.co_names[oparg2] == 'params':
+                        gotos.append((offset1,
+                                      offset4,
+                                      oparg3,
+                                      list(block_stack),
+                                      True))
+            elif opname1 in ('SETUP_LOOP',
+                             'SETUP_EXCEPT', 'SETUP_FINALLY',
+                             'SETUP_WITH', 'SETUP_ASYNC_WITH'):
+                block_counter = push_block(opname1, oparg1)
+                if opname1 == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
+                    excepts.append(endoffset1 + oparg1)
+                elif opname1 == 'SETUP_FINALLY':
+                    finallies.append(endoffset1 + oparg1)
+            elif not _BYTECODE.has_loop_blocks and opname1 == 'FOR_ITER':
+                block_counter = push_block(opname1, oparg1)
+                for_exits.append(endoffset1 + oparg1)
+            elif opname1 == 'POP_BLOCK':
+                pop_block()
+            elif opname1 == 'POP_EXCEPT':
+                pop_block_of_type('<EXCEPT>')
+            elif opname1 == 'END_FINALLY':
+                pop_block_of_type('<FINALLY>')
+            elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START') and _BYTECODE.has_setup_with:
+                block_counter = push_block('<FINALLY>') # temporary block to match END_FINALLY
+            
+        if opname1 in ('JUMP_ABSOLUTE', 'JUMP_FORWARD'):
+            dead = True
 
         opname0, oparg0, offset0 = opname1, oparg1, offset1
         opname1, oparg1, offset1 = opname2, oparg2, offset2
@@ -325,7 +338,7 @@ def _patch_code(code):
     for pos, end, _ in labels.values():
         _inject_nop_sled(buf, pos, end)
 
-    for pos, end, label, origin_stack, is_into in gotos:
+    for pos, end, label, origin_stack, has_params in gotos:
         try:
             _, target, target_stack = labels[label]
         except KeyError:
@@ -339,15 +352,12 @@ def _patch_code(code):
                 common_depth = i
                 break
             
-        if is_into:            
+        if has_params:            
             if temp_var is None:
                 temp_var = len(varnames)
-                varnames += ('goto.into.temp',)
+                varnames += ('goto.params',)
             
-            ops.append(('STORE_FAST', temp_var)) # must do this before any blocks are pushed/popped
-            
-        elif common_depth < len(target_stack):
-            raise SyntaxError('Jump into different block without "into" syntax')            
+            ops.append(('STORE_FAST', temp_var)) # must do this before any blocks are pushed/popped      
 
         for block, _, _ in reversed(origin_stack[common_depth:]):
             if block == 'FOR_ITER':
@@ -361,13 +371,15 @@ def _patch_code(code):
                 if block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
                     ops.append('POP_TOP')
                  # pypy 3.6 keeps a block around until END_FINALLY; python 3.8 reuses SETUP_FINALLY for SETUP_EXCEPT (where END_FINALLY is not accepted). What will pypy 3.8 do?
-                if __pypy__ and block in ('SETUP_FINALLY', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
-                    ops.append(('LOAD_CONST', get_const(None)))
+                if _BYTECODE.pypy_finally_semantics and block in ('SETUP_FINALLY', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
+                    ops.append('BEGIN_FINALLY' if _BYTECODE.has_begin_finally else ('LOAD_CONST', get_const(None)))
                     ops.append('END_FINALLY')
         
         tuple_i = 0
         for block, blockarg, _ in target_stack[common_depth:]:
             if block in ('SETUP_LOOP', 'FOR_ITER'):
+                if not has_params:
+                    raise SyntaxError('Jump into block without the necessary params')
                 if block != 'FOR_ITER':
                     ops.append((block, blockarg))
                 ops.append(('LOAD_FAST', temp_var))
@@ -376,6 +388,18 @@ def _patch_code(code):
                 tuple_i += 1
                 if block in ('SETUP_LOOP', 'FOR_ITER'):
                     ops.append('GET_ITER') # ensure the stack item is an iter, to avoid FOR_ITER crashing. Side-effect: convert iterables to iterators
+            elif block == '<FINALLY>':
+                if _BYTECODE.pypy_finally_semantics:
+                    ops.append('SETUP_FINALLY')
+                    ops.append('POP_BLOCK')
+                ops.append('BEGIN_FINALLY' if _BYTECODE.has_begin_finally else ('LOAD_CONST', get_const(None)))
+            elif block == '<EXCEPT>':
+                # we raise an exception to get the right block pushed
+                raise_ops = [('LOAD_CONST', get_const(None)), ('RAISE_VARARGS', 1)]
+                ops.append(('SETUP_EXCEPT' if _BYTECODE.has_setup_except else 'SETUP_FINALLY', _get_instructions_size(raise_ops))) 
+                ops += raise_ops
+                for _ in _range(3):
+                    ops.append("POP_TOP")
             else:
                 raise SyntaxError('Being worked on...')
                     
