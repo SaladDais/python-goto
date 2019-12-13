@@ -127,6 +127,39 @@ def test_jump_out_of_nested_4_loops_and_survive():
 
     assert func() == (1, 0, 0, 0, 0)
 
+def test_large_jumps_in_diff_orders():
+    @with_goto
+    def func():
+        goto .start
+        
+        if NonConstFalse:
+            label .finalle
+            return (i, j, k, m, n, i1, j1, k1, m1, n1, i2, j2, k2, m2, n2)
+        
+        label .start
+        for i in range(2):
+            for j in range(2):
+                for k in range(2):
+                    for m in range(2):
+                        for n in range(2):
+                            goto .end
+        label .end
+        for i1 in range(2):
+            for j1 in range(2):
+                for k1 in range(2):
+                    for m1 in range(2):
+                        for n1 in range(2):
+                            goto .end2
+        label .end2
+        for i2 in range(2):
+            for j2 in range(2):
+                for k2 in range(2):
+                    for m2 in range(2):
+                        for n2 in range(2):
+                            goto .finalle
+
+    assert func() == (0,) * 15
+    
 def test_jump_out_of_nested_11_loops():
     @with_goto
     def func():
@@ -193,6 +226,18 @@ def test_jump_out_of_with_block():
         
     assert func()== (1, 0)
 
+def test_jump_out_of_with_block_and_survive():
+    @with_goto
+    def func():
+        c = Context()
+        for i in range(3):
+            with c:
+                goto .out
+            label .out
+        return (i, c.data())
+        
+    assert func() == (2, (3, 0))
+    
 def test_jump_out_of_with_block_and_live():
     @with_goto
     def func():

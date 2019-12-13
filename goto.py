@@ -176,6 +176,7 @@ def _find_labels_and_gotos(code):
     for_exits = []
     excepts = []
     finallies = []
+    last_block = None
 
     opname0 = oparg0 = offset0 = None
     opname1 = oparg1 = offset1 = None # the main one we're looking at each loop iteration
@@ -196,7 +197,7 @@ def _find_labels_and_gotos(code):
     
     def pop_block():
         if block_stack:
-            block_stack.pop()
+            return block_stack.pop()
         else:
             _warn_bug("can't pop block")
             
@@ -207,14 +208,14 @@ def _find_labels_and_gotos(code):
                 replace_block(block_stack[-1], (type, block_stack[-1][1]))
             else:
                 _warn_bug("mismatched block type")
-        pop_block()
+        return pop_block()
 
     for opname4, oparg4, offset4 in _parse_instructions(code.co_code, 3):
         endoffset1 = offset2
                     
         # check for special offsets
         if for_exits and offset1 == for_exits[-1]:
-            pop_block()
+            last_block = pop_block()
             for_exits.pop()
         if excepts and offset1 == excepts[-1]:
             block_counter += 1
@@ -255,14 +256,17 @@ def _find_labels_and_gotos(code):
             block_stack.append((opname1, block_counter))
             for_exits.append(endoffset1 + oparg1)
         elif opname1 == 'POP_BLOCK':
-            pop_block()
+            last_block = pop_block()
         elif opname1 == 'POP_EXCEPT':
-            pop_block_of_type('<EXCEPT>')
+            last_block = pop_block_of_type('<EXCEPT>')
         elif opname1 == 'END_FINALLY':
             if opname0 != 'JUMP_FORWARD': # hack for dummy end-finally in except block (correct fix would be a jump-aware reading of instructions!)
-                pop_block_of_type('<FINALLY>')
-        elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START') and _BYTECODE.has_setup_with:
-            block_stack.append(('<FINALLY>', -1)) # temporary block to match END_FINALLY
+                last_block = pop_block_of_type('<FINALLY>')
+        elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START'):
+            if _BYTECODE.has_setup_with:
+                block_stack.append(('<FINALLY>', -1)) # temporary block to match END_FINALLY
+            else:
+                replace_block(last_block, ('SETUP_WITH',) + last_block[1:]) # python 2.6 - finally was actually with
 
         opname0, oparg0, offset0 = opname1, oparg1, offset1
         opname1, oparg1, offset1 = opname2, oparg2, offset2
