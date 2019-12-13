@@ -305,7 +305,8 @@ def _patch_code(code):
                     ops.append('END_FINALLY')
         ops.append(('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit))
         
-        if pos + _get_instructions_size(ops) > end:
+        size = _get_instructions_size(ops)
+        if pos + size > end:
             # not enough space, add code at buffer end and jump there & back
             buf_end = len(buf)
             
@@ -317,9 +318,7 @@ def _patch_code(code):
             pos = _write_instructions(buf, pos, go_to_end_ops)
             _inject_nop_sled(buf, pos, end)
             
-            ops.append(('JUMP_ABSOLUTE', end // _BYTECODE.jump_unit))
-            
-            buf.extend([0] * _get_instructions_size(ops))
+            buf.extend([0] * size)
             _write_instructions(buf, buf_end, ops)
             
         else:
