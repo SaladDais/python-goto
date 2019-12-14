@@ -357,7 +357,7 @@ def test_jump_into_with_unneeded_params_and_live():
 
     assert func() == (9, 0)
 
-"""def test_jump_out_of_while_true_loop():
+def test_jump_out_of_while_true_loop():
     @with_goto
     def func():
         i = 0
@@ -408,7 +408,7 @@ def test_jump_out_of_while_loop_and_live():
             label .out
         return i, j, k
 
-    assert func() == (9, 3, 5)"""
+    assert func() == (9, 3, 5)
     
 class Context:
     def __init__(self):
@@ -911,7 +911,7 @@ def test_jump_with_for_return(): # to see it doesn't confuse parser
 
     assert func() == 0
 
-"""def test_jump_with_while_true_break(): # to see it doesn't confuse parser
+def test_jump_with_while_true_break(): # to see it doesn't confuse parser
     @with_goto
     def func():
         i = 0
@@ -922,7 +922,7 @@ def test_jump_with_for_return(): # to see it doesn't confuse parser
         label .x
         return i
 
-    assert func() == 1"""
+    assert func() == 1
 
 
 def test_function_is_copy():
