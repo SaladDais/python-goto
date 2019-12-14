@@ -104,7 +104,7 @@ def _parse_instructions(code, yield_nones_at_end=0):
         extended_arg = 0
         extended_arg_offset = None
         yield (dis.opname[opcode], oparg, offset)
-        
+
     for _ in range(yield_nones_at_end):
         yield (None, None, None)
 
@@ -129,15 +129,6 @@ def _get_instructions_size(ops):
             size += _get_instruction_size(op)
         else:
             size += _get_instruction_size(*op)
-    return size    
-
-def _get_instructions_size(ops):
-    size = 0
-    for op in ops:
-        if isinstance(op, str):
-            size += _get_instruction_size(op)
-        else:
-            size += _get_instruction_size(*op) 
     return size
 
 def _write_instruction(buf, pos, opname, oparg=0):
@@ -182,28 +173,28 @@ def _find_labels_and_gotos(code):
     opname1 = oparg1 = offset1 = None # the main one we're looking at each loop iteration
     opname2 = oparg2 = offset2 = None
     opname3 = oparg3 = offset3 = None
-    
+
     def replace_block_in_stack(stack, old_block, new_block):
         for i, block in enumerate(stack):
             if block == old_block:
                 stack[i] = new_block
-                
+
     def replace_block(old_block, new_block):
         replace_block_in_stack(block_stack, old_block, new_block)
         for label in labels:
             replace_block_in_stack(labels[label][2], old_block, new_block)
         for goto in gotos:
             replace_block_in_stack(goto[3], old_block, new_block)
-    
+
     def pop_block():
         if block_stack:
             return block_stack.pop()
         else:
             _warn_bug("can't pop block")
-            
+
     def pop_block_of_type(type):
         if block_stack and block_stack[-1][0] != type:
-            # in 3.8, only finally blocks are supported, so we must determine the except/finally nature ourselves, and replace the block afterwards 
+            # in 3.8, only finally blocks are supported, so we must determine the except/finally nature ourselves, and replace the block afterwards
             if not _BYTECODE.has_setup_except and type == "<EXCEPT>" and block_stack[-1][0] == '<FINALLY>':
                 replace_block(block_stack[-1], (type, block_stack[-1][1]))
             else:
@@ -212,7 +203,7 @@ def _find_labels_and_gotos(code):
 
     for opname4, oparg4, offset4 in _parse_instructions(code.co_code, 3):
         endoffset1 = offset2
-                    
+
         # check for special offsets
         if for_exits and offset1 == for_exits[-1]:
             last_block = pop_block()
@@ -225,7 +216,7 @@ def _find_labels_and_gotos(code):
             block_counter += 1
             block_stack.append(('<FINALLY>', block_counter))
             finallies.pop()
-            
+
         # check for special opcodes
         if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
             if opname2 == 'LOAD_ATTR' and opname3 == 'POP_TOP':
@@ -288,7 +279,7 @@ def _patch_code(code):
     new_code = _patched_code_cache.get(code)
     if new_code is not None:
         return new_code
-    
+
     labels, gotos = _find_labels_and_gotos(code)
     buf = array.array('B', code.co_code)
 
@@ -343,7 +334,7 @@ def _patch_code(code):
             _inject_nop_sled(buf, pos, end)
 
     new_code = _make_code(code, _array_to_bytes(buf))
-    
+
     _patched_code_cache[code] = new_code
     return new_code
 

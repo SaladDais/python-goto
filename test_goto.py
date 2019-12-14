@@ -131,11 +131,11 @@ def test_large_jumps_in_diff_orders():
     @with_goto
     def func():
         goto .start
-        
+
         if NonConstFalse:
             label .finalle
             return (i, j, k, m, n, i1, j1, k1, m1, n1, i2, j2, k2, m2, n2)
-        
+
         label .start
         for i in range(2):
             for j in range(2):
@@ -159,7 +159,7 @@ def test_large_jumps_in_diff_orders():
                             goto .finalle
 
     assert func() == (0,) * 15
-    
+
 def test_jump_out_of_nested_11_loops():
     @with_goto
     def func():
@@ -223,7 +223,7 @@ def test_jump_out_of_with_block():
             goto .out
         label .out
         return c.data()
-        
+
     assert func()== (1, 0)
 
 def test_jump_out_of_with_block_and_survive():
@@ -235,9 +235,9 @@ def test_jump_out_of_with_block_and_survive():
                 goto .out
             label .out
         return (i, c.data())
-        
+
     assert func() == (2, (3, 0))
-    
+
 def test_jump_out_of_with_block_and_live():
     @with_goto
     def func():
@@ -248,9 +248,9 @@ def test_jump_out_of_with_block_and_live():
                     goto .out
             label .out
         return (i, j, c.data())
-        
+
     assert func() == (2, 0, (3, 0))
-    
+
 def test_jump_into_with_block():
     def func():
         with Context() as c:
@@ -270,7 +270,7 @@ def test_generator():
         label .x
         yield 4
         yield 5
-    
+
     assert tuple(func()) == (0, 1, 4, 5)
 
 def test_jump_out_of_try_block():
@@ -457,7 +457,7 @@ def test_function_is_copy():
 
     assert newfunc is not func
     assert newfunc.foo == 'bar'
-    
+
 def test_code_is_not_copy():
     def outer_func():
         @with_goto
@@ -465,7 +465,7 @@ def test_code_is_not_copy():
             goto .test
             label .test
         return inner_func
-    
+
     assert outer_func() is not outer_func()
     assert outer_func().__code__ is outer_func().__code__
-    
+
