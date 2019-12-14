@@ -203,6 +203,59 @@ def test_jump_across_loops():
 
     pytest.raises(SyntaxError, with_goto, func)
 
+def test_jump_out_of_while_true_loop():
+    @with_goto
+    def func():
+        i = 0
+        while True:
+            i += 1
+            goto .out
+        label .out
+        return i
+        
+    assert func() == 1
+
+def test_jump_out_of_while_true_loop_and_survive():
+    @with_goto
+    def func():
+        j = 0
+        for i in range(10):
+            while True:
+                j += 1
+                goto .out
+            label .out
+        return i, j
+        
+    assert func() == (9, 10)
+
+def test_jump_out_of_while_true_loop_and_live():
+    @with_goto
+    def func():
+        k = 0
+        for i in range(10):
+            for j in range(10):
+                while True:
+                    k += 1
+                    goto .out
+            label .out
+        return i, j, k
+        
+    assert func() == (9, 0, 10)
+
+def test_jump_out_of_while_loop_and_live():
+    @with_goto
+    def func():
+        k = 0
+        for i in range(10):
+            for j in range(4):
+                while k < 5:
+                    k += 1
+                    goto .out
+            label .out
+        return i, j, k
+        
+    assert func() == (9, 3, 5)
+
 class Context:
     def __init__(self):
         self.enters = 0

@@ -164,9 +164,7 @@ def _find_labels_and_gotos(code):
 
     block_stack = []
     block_counter = 0
-    for_exits = []
-    excepts = []
-    finallies = []
+    block_exits = []
     last_block = None
 
     opname0 = oparg0 = offset0 = None
@@ -204,18 +202,20 @@ def _find_labels_and_gotos(code):
     for opname4, oparg4, offset4 in _parse_instructions(code.co_code, 3):
         endoffset1 = offset2
 
-        # check for special offsets
-        if for_exits and offset1 == for_exits[-1]:
-            last_block = pop_block()
-            for_exits.pop()
-        if excepts and offset1 == excepts[-1]:
-            block_counter += 1
-            block_stack.append(('<EXCEPT>', block_counter))
-            excepts.pop()
-        if finallies and offset1 == finallies[-1]:
-            block_counter += 1
-            block_stack.append(('<FINALLY>', block_counter))
-            finallies.pop()
+        # check for block exits
+        while block_exits and offset1 == block_exits[-1][-1]:
+            block, counter, _ = block_exits.pop()
+            
+            # Necessary for FOR_ITER and sometimes needed for other blocks as well
+            if block_stack and (block, counter) == block_stack[-1][:2]:
+                last_block = pop_block()
+            
+            if block == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
+                block_counter += 1
+                block_stack.append(('<EXCEPT>', block_counter))
+            elif block == 'SETUP_FINALLY':
+                block_counter += 1
+                block_stack.append(('<FINALLY>', block_counter))
 
         # check for special opcodes
         if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
@@ -235,17 +235,11 @@ def _find_labels_and_gotos(code):
                                   list(block_stack)))
         elif opname1 in ('SETUP_LOOP',
                          'SETUP_EXCEPT', 'SETUP_FINALLY',
-                         'SETUP_WITH', 'SETUP_ASYNC_WITH'):
+                         'SETUP_WITH', 'SETUP_ASYNC_WITH') or \
+             (not _BYTECODE.has_loop_blocks and opname1 == 'FOR_ITER'):
             block_counter += 1
             block_stack.append((opname1, block_counter))
-            if opname1 == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
-                excepts.append(endoffset1 + oparg1)
-            elif opname1 == 'SETUP_FINALLY':
-                finallies.append(endoffset1 + oparg1)
-        elif not _BYTECODE.has_loop_blocks and opname1 == 'FOR_ITER':
-            block_counter += 1
-            block_stack.append((opname1, block_counter))
-            for_exits.append(endoffset1 + oparg1)
+            block_exits.append((opname1, block_counter, endoffset1 + oparg1))
         elif opname1 == 'POP_BLOCK':
             last_block = pop_block()
         elif opname1 == 'POP_EXCEPT':
@@ -266,6 +260,8 @@ def _find_labels_and_gotos(code):
 
     if block_stack:
         _warn_bug("block stack not empty")
+    if block_exits:
+        _warn_bug("block exits not empty")
 
     return labels, gotos
 
