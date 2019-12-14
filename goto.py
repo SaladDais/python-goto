@@ -282,7 +282,7 @@ def _find_labels_and_gotos(code):
                 # python 2.6 - finally was actually with
                 replace_block(last_block, ('SETUP_WITH',) + last_block[1:])
 
-        if opname1 in ('JUMP_ABSOLUTE', 'JUMP_FORWARD'):
+        elif opname1 in ('JUMP_ABSOLUTE', 'JUMP_FORWARD'):
             dead = True
 
         opname1, oparg1, offset1 = opname2, oparg2, offset2
