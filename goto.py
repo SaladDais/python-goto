@@ -176,10 +176,8 @@ def _find_labels_and_gotos(code):
     gotos = []
 
     block_stack = []
-    block_counter = 1
-    for_exits = []
-    excepts = []
-    finallies = []
+    block_counter = 0
+    block_exits = []
     last_block = None
 
     opname1 = oparg1 = offset1 = None
@@ -199,8 +197,9 @@ def _find_labels_and_gotos(code):
             replace_block_in_stack(goto[3], old_block, new_block)
 
     def push_block(opname, oparg=0):
-        block_stack.append((opname, oparg, block_counter))
-        return block_counter + 1 # to be assigned to block_counter
+        new_counter = block_counter + 1
+        block_stack.append((opname, oparg, new_counter))
+        return new_counter # to be assigned to block_counter
 
     def pop_block():
         if block_stack:
@@ -224,76 +223,75 @@ def _find_labels_and_gotos(code):
     dead = False
 
     for opname4, oparg4, offset4 in _parse_instructions(code.co_code, 3):
+        endoffset1 = offset2
+
         if offset1 in jump_targets:
             dead = False
 
-        if not dead:
-            endoffset1 = offset2
+        # check for block exits
+        while block_exits and offset1 == block_exits[-1][-1]:
+            exit, exitarg, exitcounter, _ = block_exits.pop()
 
-            # check for special offsets
-            if for_exits and offset1 == for_exits[-1]:
+            # Necessary for FOR_ITER and sometimes needed for other blocks as well
+            if block_stack and (exit, exitarg, exitcounter) == block_stack[-1]:
                 last_block = pop_block()
-                for_exits.pop()
-            if excepts and offset1 == excepts[-1]:
+
+            if exit == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
                 block_counter = push_block('<EXCEPT>')
-                excepts.pop()
-            if finallies and offset1 == finallies[-1]:
+            elif exit == 'SETUP_FINALLY':
                 block_counter = push_block('<FINALLY>')
-                finallies.pop()
 
-            # check for special opcodes
-            if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
-                if opname2 == 'LOAD_ATTR' and opname3 == 'POP_TOP':
-                    name = code.co_names[oparg1]
-                    if name == 'label':
-                        labels[oparg2] = (offset1,
-                                          offset4,
-                                          list(block_stack))
-                    elif name == 'goto':
-                        gotos.append((offset1,
+        # check for special opcodes
+        if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
+            if opname2 == 'LOAD_ATTR' and opname3 == 'POP_TOP':
+                name = code.co_names[oparg1]
+                if name == 'label':
+                    if oparg2 in labels:
+                        co_name = code.co_names[oparg2]
+                        raise SyntaxError('Ambiguous label {0!r}'.format(co_name))
+                    labels[oparg2] = (offset1,
                                       offset4,
-                                      oparg2,
-                                      list(block_stack),
-                                      0))
-                elif opname2 == 'LOAD_ATTR' and opname3 == 'STORE_ATTR':
-                    if code.co_names[oparg1] == 'goto' and \
-                       code.co_names[oparg2] in ('param', 'params'):
-                        gotos.append((offset1,
-                                      offset4,
-                                      oparg3,
-                                      list(block_stack),
-                                      code.co_names[oparg2]))
+                                      list(block_stack))
+                elif name == 'goto':
+                    gotos.append((offset1,
+                                  offset4,
+                                  oparg2,
+                                  list(block_stack),
+                                  0))
+            elif opname2 == 'LOAD_ATTR' and opname3 == 'STORE_ATTR':
+                if code.co_names[oparg1] == 'goto' and \
+                   code.co_names[oparg2] in ('param', 'params'):
+                    gotos.append((offset1,
+                                  offset4,
+                                  oparg3,
+                                  list(block_stack),
+                                  code.co_names[oparg2]))
 
-            elif opname1 in ('SETUP_LOOP',
-                             'SETUP_EXCEPT', 'SETUP_FINALLY',
-                             'SETUP_WITH', 'SETUP_ASYNC_WITH'):
-                block_counter = push_block(opname1, oparg1)
-                if opname1 == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
-                    excepts.append(endoffset1 + oparg1)
-                elif opname1 == 'SETUP_FINALLY':
-                    finallies.append(endoffset1 + oparg1)
+        elif opname1 in ('SETUP_LOOP',
+                         'SETUP_EXCEPT', 'SETUP_FINALLY',
+                         'SETUP_WITH', 'SETUP_ASYNC_WITH') or \
+              (not _BYTECODE.has_loop_blocks and opname1 == 'FOR_ITER'):
+            block_counter = push_block(opname1, oparg1)
+            block_exits.append((opname1, oparg1, block_counter, endoffset1 + oparg1))
 
-            elif not _BYTECODE.has_loop_blocks and opname1 == 'FOR_ITER':
-                block_counter = push_block(opname1, oparg1)
-                for_exits.append(endoffset1 + oparg1)
+        elif opname1 == 'POP_BLOCK':
+            last_block = pop_block()
 
-            elif opname1 == 'POP_BLOCK':
-                last_block = pop_block()
+        elif opname1 == 'POP_EXCEPT':
+            last_block = pop_block_of_type('<EXCEPT>')
 
-            elif opname1 == 'POP_EXCEPT':
-                last_block = pop_block_of_type('<EXCEPT>')
+        elif opname1 == 'END_FINALLY' and not dead:
+            # (python compilers put dead END_FINALLY's in weird places)
+            last_block = pop_block_of_type('<FINALLY>')
 
-            elif opname1 == 'END_FINALLY':
-                last_block = pop_block_of_type('<FINALLY>')
-
-            elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START'):
-                if _BYTECODE.has_setup_with:
-                    # temporary block to match END_FINALLY
-                    block_counter = push_block('<FINALLY>')
-                else:
-                    # python 2.6 - finally was actually with
-                    replace_block(last_block,
-                                  ('SETUP_WITH',) + last_block[1:])
+        elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START'):
+            if _BYTECODE.has_setup_with:
+                # temporary block to match END_FINALLY
+                block_counter = push_block('<FINALLY>')
+            else:
+                # python 2.6 - finally was actually with
+                replace_block(last_block,
+                              ('SETUP_WITH',) + last_block[1:])
 
         if opname1 in ('JUMP_ABSOLUTE', 'JUMP_FORWARD'):
             dead = True
@@ -304,6 +302,8 @@ def _find_labels_and_gotos(code):
 
     if block_stack:
         _warn_bug("block stack not empty")
+    if block_exits:
+        _warn_bug("block exits not empty")
 
     return labels, gotos
 
@@ -314,8 +314,9 @@ def _inject_nop_sled(buf, pos, end):
 
 def _inject_ops(buf, pos, end, ops):
     size = _get_instructions_size(ops)
+
     if pos + size > end:
-        # not enough space, add code at buffer end and jump there & back
+        # not enough space, add code at buffer end and jump there
         buf_end = len(buf)
 
         go_to_end_ops = [('JUMP_ABSOLUTE', buf_end // _BYTECODE.jump_unit)]
@@ -329,7 +330,6 @@ def _inject_ops(buf, pos, end, ops):
 
         buf.extend([0] * size)
         _write_instructions(buf, buf_end, ops)
-
     else:
         pos = _write_instructions(buf, pos, ops)
         _inject_nop_sled(buf, pos, end)
