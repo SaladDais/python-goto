@@ -33,7 +33,7 @@ class _Bytecode:
             self.argument = struct.Struct('<H')
             self.have_argument = dis.HAVE_ARGUMENT
             self.jump_unit = 1
-            
+
         self.has_loop_blocks = 'SETUP_LOOP' in dis.opmap
 
     @property
@@ -55,12 +55,12 @@ def _make_code(code, codestring):
             code.co_name,      code.co_firstlineno, code.co_lnotab,
             code.co_freevars,  code.co_cellvars
         ]
-    
+
         try:
             args.insert(1, code.co_kwonlyargcount)  # PY3
         except AttributeError:
             pass
-    
+
         return types.CodeType(*args)
 
 
