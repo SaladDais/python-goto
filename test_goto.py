@@ -410,6 +410,62 @@ def test_jump_out_of_while_loop_and_live():
 
     assert func() == (9, 3, 5)
     
+def test_jump_into_while_true_loop():
+    @with_goto
+    def func():
+        x = 1
+        goto .inside
+        x += 1
+        while True:
+            x += 1
+            label .inside
+            if x == 1:
+                break
+        return x
+    
+    assert func() == 1
+        
+def test_jump_into_while_true_loop_and_survive():
+    @with_goto
+    def func():
+        x = 0
+        for i in range(10):
+            goto .inside
+            while True:
+                x += 1
+                label .inside
+                break
+        return i, x
+    
+    assert func() == (9, 0)
+    
+def test_jump_into_while_loop():
+    @with_goto
+    def func():
+        c, x = 0, 0
+        goto .inside
+        while x < 10:
+            x += 1
+            label .inside
+            c += 1
+        return c, x
+    
+    assert func() == (11, 10)
+        
+def test_jump_into_while_loop_and_survive():
+    @with_goto
+    def func():
+        c, x = 0, 0
+        for i in range(5):
+            goto .inside
+            while x < 5:
+                x += 1
+                label .inside
+                c += 1
+        return i, c, x
+    
+    assert func() == (4, 10, 5)
+    
 class Context:
     def __init__(self):
         self.enters = 0
