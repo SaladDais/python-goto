@@ -40,12 +40,6 @@ class _Bytecode:
         self.has_setup_with = 'SETUP_WITH' in dis.opmap
         self.has_setup_except = 'SETUP_EXCEPT' in dis.opmap
 
-        try:
-            import __pypy__  # noqa: F401
-            self.pypy_finally_semantics = True
-        except ImportError:
-            self.pypy_finally_semantics = False
-
     @property
     def argument_bits(self):
         return self.argument.size * 8
@@ -337,11 +331,11 @@ def _patch_code(code):
                 ops.append('POP_BLOCK')
                 if block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
                     ops.append('POP_TOP')
-                # pypy 3.6 keeps a block around until END_FINALLY
-                # python 3.8 reuses SETUP_FINALLY for SETUP_EXCEPT
-                # (where END_FINALLY is not accepted).
-                # What will pypy 3.8 do?
-                if _BYTECODE.pypy_finally_semantics and \
+                # END_FINALLY is required for pypy. (To pop special block)
+                # It is not clear at this point what will happen once
+                # pypy moves to py38, where there's no distinction between
+                # except and finally setups.
+                if _BYTECODE.has_setup_except and \
                    block in ('SETUP_FINALLY', 'SETUP_WITH',
                              'SETUP_ASYNC_WITH'):
                     ops.append(('LOAD_CONST', code.co_consts.index(None)))
