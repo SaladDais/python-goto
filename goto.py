@@ -338,13 +338,15 @@ def _patch_code(code):
                 ops.append('POP_BLOCK')
                 if block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
                     ops.append('POP_TOP')
-            # END_FINALLY is needed only in pypy, but seems logical everywhere
-            if block in ('SETUP_FINALLY', 'SETUP_WITH',
-                         'SETUP_ASYNC_WITH'):
-                ops.append('BEGIN_FINALLY' if
-                           _BYTECODE.has_begin_finally else
-                           ('LOAD_CONST', code.co_consts.index(None)))
-                ops.append('END_FINALLY')
+                # END_FINALLY is needed only in pypy,
+                # but seems logical everywhere
+                if block in ('SETUP_FINALLY', 'SETUP_WITH',
+                             'SETUP_ASYNC_WITH'):
+                    ops.append('BEGIN_FINALLY' if
+                               _BYTECODE.has_begin_finally else
+                               ('LOAD_CONST', code.co_consts.index(None)))
+                    ops.append('END_FINALLY')
+
         ops.append(('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit))
 
         if pos + _get_instructions_size(ops) > end:
