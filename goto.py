@@ -39,6 +39,7 @@ class _Bytecode:
         self.has_pop_except = 'POP_EXCEPT' in dis.opmap
         self.has_setup_with = 'SETUP_WITH' in dis.opmap
         self.has_setup_except = 'SETUP_EXCEPT' in dis.opmap
+        self.has_begin_finally = 'BEGIN_FINALLY' in dis.opmap 
 
     @property
     def argument_bits(self):
@@ -187,9 +188,9 @@ class _BlockStack(object):
             _, _, _, goto_blocks = goto
             self._replace_in_stack(goto_blocks, old_block, new_block)
 
-    def push(self, opname, target_offset=None):
+    def push(self, opname, target_offset=None, previous=None):
         self.block_counter += 1
-        self.stack.append((opname, target_offset, self.block_counter))
+        self.stack.append((opname, target_offset, previous, self.block_counter))
 
     def pop(self):
         if self.stack:
@@ -229,12 +230,13 @@ def _find_labels_and_gotos(code):
 
         # check for block exits
         while block_stack and offset1 == block_stack.top()[1]:
-            exitname, _, _ = block_stack.pop()
+            exit_block = block_stack.pop()
+            exit_name = exit_block[0]
 
-            if exitname == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
-                block_stack.push('<EXCEPT>')
-            elif exitname == 'SETUP_FINALLY':
-                block_stack.push('<FINALLY>')
+            if exit_name == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
+                block_stack.push('<EXCEPT>', previous=exit_block)
+            elif exit_name == 'SETUP_FINALLY':
+                block_stack.push('<FINALLY>', previous=exit_block)
 
         # check for special opcodes
         if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
@@ -264,7 +266,11 @@ def _find_labels_and_gotos(code):
                top_block and top_block[0] == '<FINALLY>':
                 # in 3.8, only finally blocks are supported, so we must
                 # determine whether it's except/finally ourselves
-                block_stack.replace(top_block, ('<EXCEPT>',) + top_block[1:])
+                block_stack.replace(top_block,
+                                    ('<EXCEPT>',) + top_block[1:])
+                _, _, setup_block, _ = top_block
+                block_stack.replace(setup_block,
+                                    ('SETUP_EXCEPT',) + setup_block[1:])
             block_stack.pop_of_type('<EXCEPT>')
         elif opname1 == 'END_FINALLY':
             # Python puts END_FINALLY at the very end of except
@@ -320,7 +326,7 @@ def _patch_code(code):
             raise SyntaxError('Jump into different block')
 
         ops = []
-        for block, _, _ in reversed(origin_stack[target_depth:]):
+        for block, _, _, _ in reversed(origin_stack[target_depth:]):
             if block == 'FOR_ITER':
                 ops.append('POP_TOP')
             elif block == '<EXCEPT>':
@@ -331,15 +337,16 @@ def _patch_code(code):
                 ops.append('POP_BLOCK')
                 if block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
                     ops.append('POP_TOP')
-                # END_FINALLY is required for pypy. (To pop special block)
-                # It is not clear at this point what will happen once
-                # pypy moves to py38, where there's no distinction between
-                # except and finally setups.
-                if _BYTECODE.has_setup_except and \
-                   block in ('SETUP_FINALLY', 'SETUP_WITH',
-                             'SETUP_ASYNC_WITH'):
-                    ops.append(('LOAD_CONST', code.co_consts.index(None)))
-                    ops.append('END_FINALLY')
+            # END_FINALLY is required for pypy. (To pop special block)
+            # It is not clear at this point what will happen once
+            # pypy moves to py38, where there's no distinction between
+            # except and finally setups.
+            if block in ('SETUP_FINALLY', 'SETUP_WITH',
+                         'SETUP_ASYNC_WITH'):
+                ops.append('BEGIN_FINALLY' if \
+                           _BYTECODE.has_begin_finally else \
+                           ('LOAD_CONST', code.co_consts.index(None)))
+                ops.append('END_FINALLY')
         ops.append(('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit))
 
         if pos + _get_instructions_size(ops) > end:
