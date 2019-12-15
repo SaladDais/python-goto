@@ -169,66 +169,78 @@ def _warn_bug(msg):
                   " - result of with_goto may be incorrect. (%s)" % msg)
 
 
+class _BlockStack(object):
+    def __init__(self, labels, gotos):
+        self.stack = []
+        self.block_counter = 0
+        self.last_block = None
+        self.labels = labels
+        self.gotos = gotos
+
+    def _replace_in_stack(self, stack, old_block, new_block):
+        for i, block in enumerate(stack):
+            if block == old_block:
+                stack[i] = new_block
+
+    def replace(self, old_block, new_block):
+        self._replace_in_stack(self.stack, old_block, new_block)
+
+        for label in self.labels:
+            _, _, label_blocks = self.labels[label]
+            self._replace_in_stack(label_blocks, old_block, new_block)
+
+        for goto in self.gotos:
+            _, _, _, goto_blocks = goto
+            self._replace_in_stack(goto_blocks, old_block, new_block)
+
+    def push(self, opname, target_offset=None):
+        self.block_counter += 1
+        self.stack.append((opname, target_offset, self.block_counter))
+
+    def pop(self):
+        if self.stack:
+            self.last_block = self.stack.pop()
+            return self.last_block
+        else:
+            _warn_bug("can't pop block")
+
+    def pop_of_type(self, type):
+        if self.stack and self.top()[0] != type:
+            _warn_bug("mismatched block type")
+        else:
+            return self.pop()
+
+    def copy_to_list(self):
+        return list(self.stack)
+
+    def top(self):
+        return self.stack[-1] if self.stack else None
+
+    def __len__(self):
+        return len(self.stack)
+
+
 def _find_labels_and_gotos(code):
     labels = {}
     gotos = []
 
-    block_stack = []
-    block_counter = 0
-    last_block = None
+    block_stack = _BlockStack(labels, gotos)
 
     opname1 = oparg1 = offset1 = None
     opname2 = oparg2 = offset2 = None
     opname3 = oparg3 = offset3 = None
 
-    def replace_block_in_stack(stack, old_block, new_block):
-        for i, block in enumerate(stack):
-            if block == old_block:
-                stack[i] = new_block
-
-    def replace_block(old_block, new_block):
-        replace_block_in_stack(block_stack, old_block, new_block)
-        for label in labels:
-            _, _, label_blocks = labels[label]
-            replace_block_in_stack(label_blocks, old_block, new_block)
-        for goto in gotos:
-            _, _, _, goto_blocks = goto
-            replace_block_in_stack(goto_blocks, old_block, new_block)
-
-    def push_block(opname, target_offset=None):
-        new_counter = block_counter + 1
-        block_stack.append((opname, target_offset, new_counter))
-        return new_counter  # to be assigned to block_counter
-
-    def pop_block():
-        if block_stack:
-            return block_stack.pop()
-        else:
-            _warn_bug("can't pop block")
-
-    def pop_block_of_type(type):
-        if block_stack and block_stack[-1][0] != type:
-            if not _BYTECODE.has_setup_except and \
-               type == "<EXCEPT>" and block_stack[-1][0] == '<FINALLY>':
-                # in 3.8, only finally blocks are supported, so we must
-                # determine whether it's except/finally ourselves
-                replace_block(block_stack[-1], (type,) + block_stack[-1][1:])
-            else:
-                _warn_bug("mismatched block type")
-                return last_block  # better not to pop (a tiny bit)
-        return pop_block()
-
     for opname4, oparg4, offset4 in _parse_instructions(code.co_code, 3):
         endoffset1 = offset2
 
         # check for block exits
-        while block_stack and offset1 == block_stack[-1][1]:
-            exitname, _, _ = last_block = pop_block()
+        while block_stack and offset1 == block_stack.top()[1]:
+            exitname, _, _ = block_stack.pop()
 
             if exitname == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
-                block_counter = push_block('<EXCEPT>')
+                block_stack.push('<EXCEPT>')
             elif exitname == 'SETUP_FINALLY':
-                block_counter = push_block('<FINALLY>')
+                block_stack.push('<FINALLY>')
 
         # check for special opcodes
         if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
@@ -241,31 +253,39 @@ def _find_labels_and_gotos(code):
                         ))
                     labels[oparg2] = (offset1,
                                       offset4,
-                                      list(block_stack))
+                                      block_stack.copy_to_list())
                 elif name == 'goto':
                     gotos.append((offset1,
                                   offset4,
                                   oparg2,
-                                  list(block_stack)))
+                                  block_stack.copy_to_list()))
         elif (opname1 in ('SETUP_LOOP',
                           'SETUP_EXCEPT', 'SETUP_FINALLY',
                           'SETUP_WITH', 'SETUP_ASYNC_WITH')) or \
              (not _BYTECODE.has_loop_blocks and opname1 == 'FOR_ITER'):
-            block_counter = push_block(opname1, endoffset1 + oparg1)
+            block_stack.push(opname1, endoffset1 + oparg1)
         elif opname1 == 'POP_EXCEPT':
-            last_block = pop_block_of_type('<EXCEPT>')
+            top_block = block_stack.top()
+            if not _BYTECODE.has_setup_except and \
+               top_block and top_block[0] == '<FINALLY>':
+                # in 3.8, only finally blocks are supported, so we must
+                # determine whether it's except/finally ourselves
+                block_stack.replace(top_block, ('<EXCEPT>',) + top_block[1:])
+            block_stack.pop_of_type('<EXCEPT>')
         elif opname1 == 'END_FINALLY':
             # Python puts END_FINALLY at the very end of except
             # clauses, so we must ignore it in the wrong place.
-            if block_stack and block_stack[-1][0] == '<FINALLY>':
-                last_block = pop_block_of_type('<FINALLY>')
+            if block_stack and block_stack.top()[0] == '<FINALLY>':
+                block_stack.pop_of_type('<FINALLY>')
         elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START'):
             if _BYTECODE.has_setup_with:
                 # temporary block to match END_FINALLY
-                block_counter = push_block('<FINALLY>')
+                block_stack.push('<FINALLY>')
             else:
                 # python 2.6 - finally was actually with
-                replace_block(last_block, ('SETUP_WITH',) + last_block[1:])
+                last_block = block_stack.last_block
+                block_stack.replace(last_block,
+                                    ('SETUP_WITH',) + last_block[1:])
 
         opname1, oparg1, offset1 = opname2, oparg2, offset2
         opname2, oparg2, offset2 = opname3, oparg3, offset3
