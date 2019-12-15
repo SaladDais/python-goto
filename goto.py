@@ -175,10 +175,9 @@ def _find_labels_and_gotos(code):
 
     block_stack = []
     block_counter = 0
-    block_exits = []
     last_block = None
 
-    opname1 = oparg1 = offset1 = None  # the one looked at each iteration
+    opname1 = oparg1 = offset1 = None
     opname2 = oparg2 = offset2 = None
     opname3 = oparg3 = offset3 = None
 
@@ -190,9 +189,16 @@ def _find_labels_and_gotos(code):
     def replace_block(old_block, new_block):
         replace_block_in_stack(block_stack, old_block, new_block)
         for label in labels:
-            replace_block_in_stack(labels[label][2], old_block, new_block)
+            _, _, label_blocks = labels[label]
+            replace_block_in_stack(label_blocks, old_block, new_block)
         for goto in gotos:
-            replace_block_in_stack(goto[3], old_block, new_block)
+            _, _, _, goto_blocks = goto
+            replace_block_in_stack(goto_blocks, old_block, new_block)
+
+    def push_block(opname, target_offset=None):
+        new_counter = block_counter + 1
+        block_stack.append((opname, target_offset, new_counter))
+        return new_counter  # to be assigned to block_counter
 
     def pop_block():
         if block_stack:
@@ -206,34 +212,23 @@ def _find_labels_and_gotos(code):
                type == "<EXCEPT>" and block_stack[-1][0] == '<FINALLY>':
                 # in 3.8, only finally blocks are supported, so we must
                 # determine whether it's except/finally ourselves
-                replace_block(block_stack[-1], (type, block_stack[-1][1]))
-            elif type == "<FINALLY>":
-                # Python puts END_FINALLY at the very end of except
-                # clauses, so we must ignore it. 
-                return
+                replace_block(block_stack[-1], (type,) + block_stack[-1][1:])
             else:
                 _warn_bug("mismatched block type")
-                return  # better not to pop (a tiny bit)
+                return last_block  # better not to pop (a tiny bit)
         return pop_block()
 
     for opname4, oparg4, offset4 in _parse_instructions(code.co_code, 3):
         endoffset1 = offset2
 
         # check for block exits
-        while block_exits and offset1 == block_exits[-1][-1]:
-            block, counter, _ = block_exits.pop()
+        while block_stack and offset1 == block_stack[-1][1]:
+            exitname, _, _ = last_block = pop_block()
 
-            # Necessary for FOR_ITER and sometimes needed for
-            # other blocks as well
-            if block_stack and (block, counter) == block_stack[-1][:2]:
-                last_block = pop_block()
-
-            if block == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
-                block_counter += 1
-                block_stack.append(('<EXCEPT>', block_counter))
-            elif block == 'SETUP_FINALLY':
-                block_counter += 1
-                block_stack.append(('<FINALLY>', block_counter))
+            if exitname == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
+                block_counter = push_block('<EXCEPT>')
+            elif exitname == 'SETUP_FINALLY':
+                block_counter = push_block('<FINALLY>')
 
         # check for special opcodes
         if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
@@ -256,19 +251,18 @@ def _find_labels_and_gotos(code):
                           'SETUP_EXCEPT', 'SETUP_FINALLY',
                           'SETUP_WITH', 'SETUP_ASYNC_WITH')) or \
              (not _BYTECODE.has_loop_blocks and opname1 == 'FOR_ITER'):
-            block_counter += 1
-            block_stack.append((opname1, block_counter))
-            block_exits.append((opname1, block_counter, endoffset1 + oparg1))
-        elif opname1 == 'POP_BLOCK':
-            last_block = pop_block()
+            block_counter = push_block(opname1, endoffset1 + oparg1)
         elif opname1 == 'POP_EXCEPT':
             last_block = pop_block_of_type('<EXCEPT>')
         elif opname1 == 'END_FINALLY':
-            last_block = pop_block_of_type('<FINALLY>')
+            # Python puts END_FINALLY at the very end of except
+            # clauses, so we must ignore it in the wrong place.
+            if block_stack and block_stack[-1][0] == '<FINALLY>':
+                last_block = pop_block_of_type('<FINALLY>')
         elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START'):
             if _BYTECODE.has_setup_with:
                 # temporary block to match END_FINALLY
-                block_stack.append(('<FINALLY>', -1))
+                block_counter = push_block('<FINALLY>')
             else:
                 # python 2.6 - finally was actually with
                 replace_block(last_block, ('SETUP_WITH',) + last_block[1:])
@@ -279,8 +273,6 @@ def _find_labels_and_gotos(code):
 
     if block_stack:
         _warn_bug("block stack not empty")
-    if block_exits:
-        _warn_bug("block exits not empty")
 
     return labels, gotos
 
@@ -314,7 +306,7 @@ def _patch_code(code):
             raise SyntaxError('Jump into different block')
 
         ops = []
-        for block, _ in reversed(origin_stack[target_depth:]):
+        for block, _, _ in reversed(origin_stack[target_depth:]):
             if block == 'FOR_ITER':
                 ops.append('POP_TOP')
             elif block == '<EXCEPT>':

@@ -339,19 +339,6 @@ def test_generator():
         yield 5
 
     assert tuple(func()) == (0, 1, 4, 5)
-def test_generator():
-    @with_goto
-    def func():
-        yield 0
-        yield 1
-        goto .x
-        yield 2
-        yield 3
-        label .x
-        yield 4
-        yield 5
-
-    assert tuple(func()) == (0, 1, 4, 5)
 
 
 def test_jump_out_of_try_except_block():
@@ -365,7 +352,7 @@ def test_jump_out_of_try_except_block():
         label .end
         return rv
 
-    assert func() == None
+    assert func() is None
 
 
 def test_jump_out_of_try_except_block_and_live():
@@ -395,7 +382,7 @@ def test_jump_out_of_try_finally_block():
         label .end
         return rv
 
-    assert func() == None
+    assert func() is None
 
 
 def test_jump_out_of_try_finally_block_and_live():
@@ -547,7 +534,7 @@ def test_jump_out_of_bare_except_block_and_live():
             for j in range(3):
                 try:
                     rv = 1 / 0
-                except:
+                except:  # noqa: E722
                     rv = 'except'
                     goto .end
                 finally:
