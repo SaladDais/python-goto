@@ -39,7 +39,7 @@ class _Bytecode:
         self.has_pop_except = 'POP_EXCEPT' in dis.opmap
         self.has_setup_with = 'SETUP_WITH' in dis.opmap
         self.has_setup_except = 'SETUP_EXCEPT' in dis.opmap
-        self.has_begin_finally = 'BEGIN_FINALLY' in dis.opmap 
+        self.has_begin_finally = 'BEGIN_FINALLY' in dis.opmap
 
     @property
     def argument_bits(self):
@@ -190,7 +190,8 @@ class _BlockStack(object):
 
     def push(self, opname, target_offset=None, previous=None):
         self.block_counter += 1
-        self.stack.append((opname, target_offset, previous, self.block_counter))
+        self.stack.append((opname, target_offset,
+                           previous, self.block_counter))
 
     def pop(self):
         if self.stack:
@@ -343,8 +344,8 @@ def _patch_code(code):
             # except and finally setups.
             if block in ('SETUP_FINALLY', 'SETUP_WITH',
                          'SETUP_ASYNC_WITH'):
-                ops.append('BEGIN_FINALLY' if \
-                           _BYTECODE.has_begin_finally else \
+                ops.append('BEGIN_FINALLY' if
+                           _BYTECODE.has_begin_finally else
                            ('LOAD_CONST', code.co_consts.index(None)))
                 ops.append('END_FINALLY')
         ops.append(('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit))
