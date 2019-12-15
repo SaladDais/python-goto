@@ -246,7 +246,7 @@ def _patch_code(code):
 
         ops = []
 
-        for block, _ in reversed(origin_stack[target_depth:]):
+        for block, _ in origin_stack[target_depth:]:
             if block == 'FOR_ITER':
                 ops.append('POP_TOP')
             else:
