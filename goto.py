@@ -21,17 +21,17 @@ class _Bytecode:
         code = (lambda: x if x else y).__code__.co_code
         opcode, oparg = struct.unpack_from('BB', code, 2)
 
-        # Starting with Python 3.6, the bytecode format has been changed to use
+        # Starting with Python 3.6, the bytecode format has changed, using
         # 16-bit words (8-bit opcode + 8-bit argument) for each instruction,
-        # as opposed to previously 24-bit (8-bit opcode + 16-bit argument) for
-        # instructions that expect an argument or just 8-bit for those that don't.
+        # as opposed to previously 24 bit (8-bit opcode + 16-bit argument)
+        # for instructions that expect an argument and otherwise 8 bit.
         # https://bugs.python.org/issue26647
         if dis.opname[opcode] == 'POP_JUMP_IF_FALSE':
             self.argument = struct.Struct('B')
             self.have_argument = 0
-            # As of Python 3.6, jump targets are still addressed by their byte
-            # unit. This, however, is matter to change, so that jump targets,
-            # in the future, will refer to the code unit (address in bytes / 2).
+            # As of Python 3.6, jump targets are still addressed by their
+            # byte unit. This is matter to change, so that jump targets,
+            # in the future might refer to code units (address in bytes / 2).
             # https://bugs.python.org/issue26647
             self.jump_unit = 8 // oparg
         else:
@@ -58,12 +58,14 @@ class _Bytecode:
 
 _BYTECODE = _Bytecode()
 
+
 # use a weak dictionary in case code objects can be garbage-collected
 _patched_code_cache = weakref.WeakKeyDictionary()
 try:
     _patched_code_cache[_Bytecode.__init__.__code__] = None
 except TypeError:
-    _patched_code_cache = {} # ...unless not supported
+    _patched_code_cache = {}  # ...unless not supported
+
 
 def _make_code(code, codestring, data):
     try:
@@ -73,7 +75,7 @@ def _make_code(code, codestring, data):
                             co_varnames=data.varnames,
                             co_consts=data.consts,
                             co_names=data.names)
-    except:
+    except AttributeError:
         args = [
             code.co_argcount,  data.nlocals,        code.co_stacksize,
             code.co_flags,     codestring,          data.consts,
@@ -120,6 +122,7 @@ def _parse_instructions(code, yield_nones_at_end=0):
     for _ in _range(yield_nones_at_end):
         yield (None, None, None)
 
+
 def _get_instruction_size(opname, oparg=0):
     size = 1
 
@@ -134,6 +137,7 @@ def _get_instruction_size(opname, oparg=0):
 
     return size
 
+
 def _get_instructions_size(ops):
     size = 0
     for op in ops:
@@ -142,6 +146,7 @@ def _get_instructions_size(ops):
         else:
             size += _get_instruction_size(*op)
     return size
+
 
 def _write_instruction(buf, pos, opname, oparg=0):
     extended_arg = oparg >> _BYTECODE.argument_bits
@@ -159,6 +164,7 @@ def _write_instruction(buf, pos, opname, oparg=0):
 
     return pos
 
+
 def _write_instructions(buf, pos, ops):
     for op in ops:
         if isinstance(op, str):
@@ -167,74 +173,87 @@ def _write_instructions(buf, pos, ops):
             pos = _write_instruction(buf, pos, *op)
     return pos
 
+
 def _warn_bug(msg):
     warnings.warn("Internal error detected" +
                   " - result of with_goto may be incorrect. (%s)" % msg)
+
+
+class _BlockStack(object):
+    def __init__(self, labels, gotos):
+        self.stack = []
+        self.block_counter = 0
+        self.last_block = None
+        self.labels = labels
+        self.gotos = gotos
+
+    def _replace_in_stack(self, stack, old_block, new_block):
+        for i, block in enumerate(stack):
+            if block == old_block:
+                stack[i] = new_block
+
+    def replace(self, old_block, new_block):
+        self._replace_in_stack(self.stack, old_block, new_block)
+
+        for label in self.labels:
+            _, _, label_blocks = self.labels[label]
+            self._replace_in_stack(label_blocks, old_block, new_block)
+
+        for goto in self.gotos:
+            _, _, _, goto_blocks = goto
+            self._replace_in_stack(goto_blocks, old_block, new_block)
+
+    def push(self, opname, target_offset=None, previous=None):
+        self.block_counter += 1
+        self.stack.append((opname, target_offset,
+                           previous, self.block_counter))
+
+    def pop(self):
+        if self.stack:
+            self.last_block = self.stack.pop()
+            return self.last_block
+        else:
+            _warn_bug("can't pop block")
+
+    def pop_of_type(self, type):
+        if self.stack and self.top()[0] != type:
+            _warn_bug("mismatched block type")
+        else:
+            return self.pop()
+
+    def copy_to_list(self):
+        return list(self.stack)
+
+    def top(self):
+        return self.stack[-1] if self.stack else None
+
+    def __len__(self):
+        return len(self.stack)
+
 
 def _find_labels_and_gotos(code):
     labels = {}
     gotos = []
 
-    block_stack = []
-    block_counter = 0
-    last_block = None
+    block_stack = _BlockStack(labels, gotos)
 
     opname1 = oparg1 = offset1 = None
     opname2 = oparg2 = offset2 = None
     opname3 = oparg3 = offset3 = None
 
-    def replace_block_in_stack(stack, old_block, new_block):
-        for i, block in enumerate(stack):
-            if block == old_block:
-                stack[i] = new_block
-
-    def replace_block(old_block, new_block):
-        replace_block_in_stack(block_stack, old_block, new_block)
-        for label in labels:
-            replace_block_in_stack(labels[label][2], old_block, new_block)
-        for goto in gotos:
-            replace_block_in_stack(goto[3], old_block, new_block)
-
-    def push_block(opname, target_offset=None):
-        new_counter = block_counter + 1
-        block_stack.append((opname, target_offset, new_counter))
-        return new_counter # to be assigned to block_counter
-
-    def pop_block():
-        if block_stack:
-            return block_stack.pop()
-        else:
-            _warn_bug("can't pop block")
-
-    def pop_block_of_type(type):
-        if block_stack and block_stack[-1][0] != type:
-            # in 3.8, only finally blocks are supported, so we must determine
-            # except/finally ourselves, and replace the block's type
-            if not _BYTECODE.has_setup_except and \
-               type == "<EXCEPT>" and \
-               block_stack[-1][0] == '<FINALLY>':
-                replace_block(block_stack[-1], (type,) + block_stack[-1][1:])
-            else:
-                _warn_bug("mismatched block type")
-        return pop_block()
-
-    jump_targets = set(dis.findlabels(code.co_code))
-    dead = False
-
     for opname4, oparg4, offset4 in _parse_instructions(code.co_code, 3):
         endoffset1 = offset2
 
-        if offset1 in jump_targets:
-            dead = False
-
         # check for block exits
-        while block_stack and offset1 == block_stack[-1][1]:
-            exitname, _, _ = last_block = pop_block()
+        while block_stack and offset1 == block_stack.top()[1]:
+            exit_block = block_stack.pop()
+            exit_name = exit_block[0]
 
-            if exitname == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
-                block_counter = push_block('<EXCEPT>')
-            elif exitname == 'SETUP_FINALLY':
-                block_counter = push_block('<FINALLY>')
+            if exit_name == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
+                block_stack.push('<EXCEPT>', previous=exit_block)
+            elif exit_name == 'SETUP_FINALLY':
+                block_stack.push('<FINALLY>', previous=exit_block)
+
 
         # check for special opcodes
         if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
@@ -242,16 +261,17 @@ def _find_labels_and_gotos(code):
                 name = code.co_names[oparg1]
                 if name == 'label':
                     if oparg2 in labels:
-                        co_name = code.co_names[oparg2]
-                        raise SyntaxError('Ambiguous label {0!r}'.format(co_name))
+                        raise SyntaxError('Ambiguous label {0!r}'.format(
+                            code.co_names[oparg2]
+                        ))
                     labels[oparg2] = (offset1,
                                       offset4,
-                                      list(block_stack))
+                                      block_stack.copy_to_list())
                 elif name == 'goto':
                     gotos.append((offset1,
                                   offset4,
                                   oparg2,
-                                  list(block_stack),
+                                  block_stack.copy_to_list(),
                                   0))
             elif opname2 == 'LOAD_ATTR' and opname3 == 'STORE_ATTR':
                 if code.co_names[oparg1] == 'goto' and \
@@ -259,31 +279,38 @@ def _find_labels_and_gotos(code):
                     gotos.append((offset1,
                                   offset4,
                                   oparg3,
-                                  list(block_stack),
+                                  block_stack.copy_to_list(),
                                   code.co_names[oparg2]))
-
         elif opname1 in ('SETUP_LOOP', 'FOR_ITER',
-                         'SETUP_EXCEPT', 'SETUP_FINALLY',
+                          'SETUP_EXCEPT', 'SETUP_FINALLY',
                          'SETUP_WITH', 'SETUP_ASYNC_WITH'):
-            block_counter = push_block(opname1, endoffset1 + oparg1)
-
+            block_stack.push(opname1, endoffset1 + oparg1)
         elif opname1 == 'POP_EXCEPT':
-            last_block = pop_block_of_type('<EXCEPT>')
-
+            top_block = block_stack.top()
+            if not _BYTECODE.has_setup_except and \
+               top_block and top_block[0] == '<FINALLY>':
+                # in 3.8, only finally blocks are supported, so we must
+                # determine whether it's except/finally ourselves
+                block_stack.replace(top_block,
+                                    ('<EXCEPT>',) + top_block[1:])
+                _, _, setup_block, _ = top_block
+                block_stack.replace(setup_block,
+                                    ('SETUP_EXCEPT',) + setup_block[1:])
+            block_stack.pop_of_type('<EXCEPT>')
         elif opname1 == 'END_FINALLY' and not dead:
-            # (python compilers put dead END_FINALLY's in weird places)
-            last_block = pop_block_of_type('<FINALLY>')
-
+            # Python puts END_FINALLY at the very end of except
+            # clauses, so we must ignore it in the wrong place.
+            if block_stack and block_stack.top()[0] == '<FINALLY>':
+                last_block = pop_block_of_type('<FINALLY>')
         elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START'):
             if _BYTECODE.has_setup_with:
                 # temporary block to match END_FINALLY
-                block_counter = push_block('<FINALLY>')
+                block_stack.append(('<FINALLY>', -1)) # temporary block to match END_FINALLY
             else:
                 # python 2.6 - finally was actually with
-                replace_block(last_block, ('SETUP_WITH',) + last_block[1:])
-
-        elif opname1 in ('JUMP_ABSOLUTE', 'JUMP_FORWARD'):
-            dead = True
+                last_block = block_stack.last_block
+                block_stack.replace(last_block,
+                                    ('SETUP_WITH',) + last_block[1:])
 
         opname1, oparg1, offset1 = opname2, oparg2, offset2
         opname2, oparg2, offset2 = opname3, oparg3, offset3
@@ -368,7 +395,9 @@ def _patch_code(code):
         try:
             _, target, target_stack = labels[label]
         except KeyError:
-            raise SyntaxError('Unknown label {0!r}'.format(code.co_names[label]))
+            raise SyntaxError('Unknown label {0!r}'.format(
+                code.co_names[label]
+            ))
 
         ops = []
 
@@ -388,7 +417,7 @@ def _patch_code(code):
             many_params = (params != 'param')
 
         # pop blocks
-        for block, _, _ in reversed(origin_stack[common_depth:]):
+        for block, _, _, _ in reversed(origin_stack[common_depth:]):
             if block == 'FOR_ITER':
                 if not _BYTECODE.has_loop_blocks:
                     ops.append('POP_TOP')
@@ -400,18 +429,13 @@ def _patch_code(code):
                 ops.append('POP_BLOCK')
                 if block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
                     ops.append('POP_TOP')
-                # pypy 3.6 keeps a block around until END_FINALLY;
-                # python 3.8 reuses SETUP_FINALLY for SETUP_EXCEPT
-                # (where END_FINALLY is not accepted).
-                # What will pypy 3.8 do?
-                if _BYTECODE.pypy_finally_semantics and \
-                   block in ('SETUP_FINALLY', 'SETUP_WITH',
-                             'SETUP_ASYNC_WITH'):
-                    if _BYTECODE.has_begin_finally:
-                        ops.append('BEGIN_FINALLY')
-                    else:
-                        ops.append(('LOAD_CONST', data.get_const(None)))
-                    ops.append('END_FINALLY')
+	            # END_FINALLY is needed only in pypy, but seems logical everywhere
+	            if block in ('SETUP_FINALLY',
+                             'SETUP_WITH', 'SETUP_ASYNC_WITH'):
+	                ops.append('BEGIN_FINALLY' if
+	                           _BYTECODE.has_begin_finally else
+	                           ('LOAD_CONST', code.co_consts.index(None)))
+	                ops.append('END_FINALLY')
 
         # push blocks
         def setup_block_absolute(block, block_end):
@@ -422,7 +446,7 @@ def _patch_code(code):
             ops.extend((setup_block_op, skip_jump_op, jump_abs_op))
         
         tuple_i = 0
-        for block, block_target, _ in target_stack[common_depth:]:
+        for block, block_target, _, _ in target_stack[common_depth:]:
             if block in ('FOR_ITER', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
                 if not params:
                     raise SyntaxError(
