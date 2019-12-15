@@ -109,6 +109,7 @@ def test_jump_into_loop_iter_param():
 
     assert func() == (4, 0)
 
+
 def test_jump_into_loop_iter_params():
     @with_goto
     def func():
@@ -120,6 +121,7 @@ def test_jump_into_loop_iter_params():
 
     assert func() == (4, 0)
 
+
 def test_jump_into_loop_iterable_param():
     @with_goto
     def func():
@@ -129,6 +131,7 @@ def test_jump_into_loop_iterable_param():
         return i
 
     assert func() == 4
+
 
 def test_jump_into_loop_bad_params():
     @with_goto
@@ -140,6 +143,7 @@ def test_jump_into_loop_bad_params():
 
     pytest.raises(TypeError, func)
 
+
 def test_jump_into_loop_params_not_seq():
     @with_goto
     def func():
@@ -149,6 +153,7 @@ def test_jump_into_loop_params_not_seq():
         return i
 
     pytest.raises(TypeError, func)
+
 
 def test_jump_into_loop_param_with_index():
     @with_goto
@@ -163,6 +168,7 @@ def test_jump_into_loop_param_with_index():
 
     assert func() == [-1, 0, 1, 2, 3, 4]
 
+
 def test_jump_into_loop_param_without_index():
     @with_goto
     def func():
@@ -174,6 +180,7 @@ def test_jump_into_loop_param_without_index():
         return lst
 
     pytest.raises(UnboundLocalError, func)
+
 
 def test_jump_into_2_loops_and_live():
     @with_goto
@@ -188,6 +195,7 @@ def test_jump_into_2_loops_and_live():
         return i, c
 
     assert func() == (2, 11 + 6)
+
 
 def test_jump_out_then_back_in_for_loop_and_survive():
     @with_goto
@@ -331,6 +339,7 @@ def test_jump_across_loops_with_param():
 
     assert func() == 2
 
+
 def test_jump_across_loops_with_param_and_live():
     @with_goto
     def func():
@@ -346,6 +355,7 @@ def test_jump_across_loops_with_param_and_live():
 
     assert func() == (4, 2)
 
+
 def test_jump_into_with_unneeded_params_and_live():
     @with_goto
     def func():
@@ -357,6 +367,7 @@ def test_jump_into_with_unneeded_params_and_live():
         return (i, j)
 
     assert func() == (9, 0)
+
 
 def test_jump_out_of_while_true_loop():
     @with_goto
@@ -413,7 +424,8 @@ def test_jump_out_of_while_loop_and_live():
         return i, j, k
 
     assert func() == (9, 3, 5)
-    
+
+
 def test_jump_into_while_true_loop():
     @with_goto
     def func():
@@ -426,9 +438,10 @@ def test_jump_into_while_true_loop():
             if x == 1:
                 break
         return x
-    
+
     assert func() == 1
-        
+
+
 def test_jump_into_while_true_loop_and_survive():
     @with_goto
     def func():
@@ -440,9 +453,10 @@ def test_jump_into_while_true_loop_and_survive():
                 label .inside
                 break
         return i, x
-    
+
     assert func() == (9, 0)
-    
+
+
 def test_jump_into_while_loop():
     @with_goto
     def func():
@@ -453,9 +467,10 @@ def test_jump_into_while_loop():
             label .inside
             c += 1
         return c, x
-    
+
     assert func() == (11, 10)
-        
+
+
 def test_jump_into_while_loop_and_survive():
     @with_goto
     def func():
@@ -467,9 +482,10 @@ def test_jump_into_while_loop_and_survive():
                 label .inside
                 c += 1
         return i, c, x
-    
+
     assert func() == (4, 10, 5)
-    
+
+
 class Context:
     def __init__(self):
         self.enters = 0
@@ -534,6 +550,7 @@ def test_jump_into_with_block_without_params():
 
     pytest.raises(SyntaxError, with_goto, func)
 
+
 def test_jump_into_with_block_with_param():
     @with_goto
     def func():
@@ -545,6 +562,7 @@ def test_jump_into_with_block_with_param():
 
     assert func() == (0, 1)
 
+
 def test_jump_into_with_block_with_params():
     @with_goto
     def func():
@@ -555,6 +573,7 @@ def test_jump_into_with_block_with_params():
         return c.data()
 
     assert func() == (0, 1)
+
 
 def test_jump_into_with_block_and_survive():
     @with_goto
@@ -568,14 +587,17 @@ def test_jump_into_with_block_and_survive():
 
     assert func() == (9, (0, 10))
 
+
 def test_jump_into_with_block_with_bad_params():
     @with_goto
     def func():
         with Context() as c:
             label .block
         goto.param .block = 123
+        return c
 
     pytest.raises(AttributeError, func)
+
 
 def test_jump_into_with_block_with_bad_exit_params():
     class BadAttr:
@@ -586,8 +608,10 @@ def test_jump_into_with_block_with_bad_exit_params():
         with Context() as c:
             label .block
         goto.param .block = BadAttr
+        return c
 
     pytest.raises(TypeError, func)
+
 
 def test_jump_out_then_in_with_block_and_survive():
     @with_goto
@@ -608,6 +632,7 @@ def test_jump_out_then_in_with_block_and_survive():
         return i, cc, c.data()
 
     assert func() == (9, 10, (10, 10))
+
 
 def test_jump_out_then_in_2_nested_with_blocks_and_survive():
     @with_goto
@@ -631,6 +656,7 @@ def test_jump_out_then_in_2_nested_with_blocks_and_survive():
         return i, cc, c1.data(), c2.data()
 
     assert func() == (10, 10, (11, 11), (10, 10))
+
 
 def test_generator():
     @with_goto
@@ -774,6 +800,7 @@ def test_jump_into_try_block():
 
     assert func() == 3
 
+
 def test_jump_into_try_except_block_and_survive():
     @with_goto
     def func():
@@ -783,11 +810,12 @@ def test_jump_into_try_except_block_and_survive():
             try:
                 rv = 1
                 label .block
-            except:
+            except Exception:
                 rv = 2
         return i, rv
 
     assert func() == (9, 0)
+
 
 def test_jump_into_try_finally_block_and_survive():
     @with_goto
@@ -804,6 +832,7 @@ def test_jump_into_try_finally_block_and_survive():
 
     assert func() == (9, 0, 1)
 
+
 def test_jump_into_try_block_and_survive():
     @with_goto
     def func():
@@ -813,7 +842,7 @@ def test_jump_into_try_block_and_survive():
             try:
                 rv = 1
                 label .block
-            except:
+            except Exception:
                 rv = 2
             finally:
                 fv = 1
@@ -911,12 +940,13 @@ def test_jump_into_except_block():
         goto .block
         try:
             i = 2
-        except:
+        except Exception:
             label .block
             i = 3
         return i
 
     assert func() == 3
+
 
 def test_jump_into_except_block_and_live():
     @with_goto
@@ -926,11 +956,10 @@ def test_jump_into_except_block_and_live():
             goto .block
             try:
                 j = 2
-            except:
+            except Exception:
                 label .block
                 j = 3
         return i, j
-
 
 
 def test_jump_out_of_finally_block_w_except():
@@ -965,7 +994,6 @@ def test_jump_out_of_finally_block_w_except_and_live():
                     rv = 'end'
             label .end
         return i, j, rv
-
 
 
 def test_jump_out_of_finally_block():
@@ -1026,6 +1054,7 @@ def test_jump_out_of_try_in_except_in_finally_and_live():
 
     assert func() == (2, 0, 'try')
 
+
 def test_jump_into_finally_block():
     @with_goto
     def func():
@@ -1039,6 +1068,7 @@ def test_jump_into_finally_block():
         return rv
 
     assert func() == 2
+
 
 def test_jump_into_finally_block_and_live():
     @with_goto
@@ -1054,6 +1084,7 @@ def test_jump_into_finally_block_and_live():
         return i, rv
 
     assert func() == (2, 2)
+
 
 def test_jump_to_unknown_label():
     def func():
@@ -1071,7 +1102,7 @@ def test_jump_to_ambiguous_label():
     pytest.raises(SyntaxError, with_goto, func)
 
 
-def test_jump_with_for_break(): # to see it doesn't confuse parser
+def test_jump_with_for_break():  # to see it doesn't confuse parser
     @with_goto
     def func():
         for i in range(4):
@@ -1082,7 +1113,8 @@ def test_jump_with_for_break(): # to see it doesn't confuse parser
 
     assert func() == 0
 
-def test_jump_with_for_continue(): # to see it doesn't confuse parser
+
+def test_jump_with_for_continue():  # to see it doesn't confuse parser
     @with_goto
     def func():
         for i in range(4):
@@ -1093,7 +1125,8 @@ def test_jump_with_for_continue(): # to see it doesn't confuse parser
 
     assert func() == 0
 
-def test_jump_with_for_return(): # to see it doesn't confuse parser
+
+def test_jump_with_for_return():  # to see it doesn't confuse parser
     @with_goto
     def func():
         for i in range(4):
@@ -1104,7 +1137,8 @@ def test_jump_with_for_return(): # to see it doesn't confuse parser
 
     assert func() == 0
 
-def test_jump_with_while_true_break(): # to see it doesn't confuse parser
+
+def test_jump_with_while_true_break():  # to see it doesn't confuse parser
     @with_goto
     def func():
         i = 0

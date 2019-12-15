@@ -16,6 +16,7 @@ try:
 except NameError:
     _range = range
 
+
 class _Bytecode:
     def __init__(self):
         code = (lambda: x if x else y).__code__.co_code
@@ -44,12 +45,6 @@ class _Bytecode:
         self.has_setup_with = 'SETUP_WITH' in dis.opmap
         self.has_setup_except = 'SETUP_EXCEPT' in dis.opmap
         self.has_begin_finally = 'BEGIN_FINALLY' in dis.opmap
-
-        try:
-            import __pypy__
-            self.pypy_finally_semantics = True
-        except:
-            self.pypy_finally_semantics = False
 
     @property
     def argument_bits(self):
@@ -200,7 +195,7 @@ class _BlockStack(object):
             self._replace_in_stack(label_blocks, old_block, new_block)
 
         for goto in self.gotos:
-            _, _, _, goto_blocks = goto
+            _, _, _, goto_blocks, _ = goto
             self._replace_in_stack(goto_blocks, old_block, new_block)
 
     def push(self, opname, target_offset=None, previous=None):
@@ -254,7 +249,6 @@ def _find_labels_and_gotos(code):
             elif exit_name == 'SETUP_FINALLY':
                 block_stack.push('<FINALLY>', previous=exit_block)
 
-
         # check for special opcodes
         if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
             if opname2 == 'LOAD_ATTR' and opname3 == 'POP_TOP':
@@ -282,7 +276,7 @@ def _find_labels_and_gotos(code):
                                   block_stack.copy_to_list(),
                                   code.co_names[oparg2]))
         elif opname1 in ('SETUP_LOOP', 'FOR_ITER',
-                          'SETUP_EXCEPT', 'SETUP_FINALLY',
+                         'SETUP_EXCEPT', 'SETUP_FINALLY',
                          'SETUP_WITH', 'SETUP_ASYNC_WITH'):
             block_stack.push(opname1, endoffset1 + oparg1)
         elif opname1 == 'POP_EXCEPT':
@@ -297,15 +291,15 @@ def _find_labels_and_gotos(code):
                 block_stack.replace(setup_block,
                                     ('SETUP_EXCEPT',) + setup_block[1:])
             block_stack.pop_of_type('<EXCEPT>')
-        elif opname1 == 'END_FINALLY' and not dead:
+        elif opname1 == 'END_FINALLY':
             # Python puts END_FINALLY at the very end of except
             # clauses, so we must ignore it in the wrong place.
             if block_stack and block_stack.top()[0] == '<FINALLY>':
-                last_block = pop_block_of_type('<FINALLY>')
+                block_stack.pop_of_type('<FINALLY>')
         elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START'):
             if _BYTECODE.has_setup_with:
                 # temporary block to match END_FINALLY
-                block_stack.append(('<FINALLY>', -1)) # temporary block to match END_FINALLY
+                block_stack.push('<FINALLY>')
             else:
                 # python 2.6 - finally was actually with
                 last_block = block_stack.last_block
@@ -325,6 +319,7 @@ def _find_labels_and_gotos(code):
 def _inject_nop_sled(buf, pos, end):
     while pos < end:
         pos = _write_instruction(buf, pos, 'NOP')
+
 
 def _inject_ops(buf, pos, end, ops):
     size = _get_instructions_size(ops)
@@ -347,6 +342,7 @@ def _inject_ops(buf, pos, end, ops):
     else:
         pos = _write_instructions(buf, pos, ops)
         _inject_nop_sled(buf, pos, end)
+
 
 class _CodeData:
     def __init__(self, code):
@@ -376,6 +372,7 @@ class _CodeData:
         self.varnames += (name,)
         self.nlocals += 1
         return idx
+
 
 def _patch_code(code):
     new_code = _patched_code_cache.get(code)
@@ -429,22 +426,25 @@ def _patch_code(code):
                 ops.append('POP_BLOCK')
                 if block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
                     ops.append('POP_TOP')
-	            # END_FINALLY is needed only in pypy, but seems logical everywhere
-	            if block in ('SETUP_FINALLY',
+                # END_FINALLY is needed only in pypy,
+                # but seems logical everywhere
+                if block in ('SETUP_FINALLY',
                              'SETUP_WITH', 'SETUP_ASYNC_WITH'):
-	                ops.append('BEGIN_FINALLY' if
-	                           _BYTECODE.has_begin_finally else
-	                           ('LOAD_CONST', code.co_consts.index(None)))
-	                ops.append('END_FINALLY')
+                    ops.append('BEGIN_FINALLY' if
+                               _BYTECODE.has_begin_finally else
+                               ('LOAD_CONST', code.co_consts.index(None)))
+                    ops.append('END_FINALLY')
 
         # push blocks
         def setup_block_absolute(block, block_end):
-            # there's no SETUP_*_ABSOLUTE, so we setup forward to an JUMP_ABSOLUTE
+            # there's no SETUP_*_ABSOLUTE,
+            # so we setup forward to an JUMP_ABSOLUTE
             jump_abs_op = ('JUMP_ABSOLUTE', block_end)
-            skip_jump_op = ('JUMP_FORWARD', _get_instruction_size(*jump_abs_op))
+            skip_jump_op = ('JUMP_FORWARD',
+                            _get_instruction_size(*jump_abs_op))
             setup_block_op = (block, _get_instruction_size(*skip_jump_op))
             ops.extend((setup_block_op, skip_jump_op, jump_abs_op))
-        
+
         tuple_i = 0
         for block, block_target, _, _ in target_stack[common_depth:]:
             if block in ('FOR_ITER', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
@@ -472,24 +472,27 @@ def _patch_code(code):
                     setup_block_absolute('SETUP_FINALLY', block_target)
 
             elif block in ('SETUP_LOOP', 'SETUP_EXCEPT', 'SETUP_FINALLY'):
+                if block == 'SETUP_EXCEPT' and not _BYTECODE.has_setup_except:
+                    block = 'SETUP_FINALLY'
                 setup_block_absolute(block, block_target)
 
             elif block == '<FINALLY>':
-                if _BYTECODE.pypy_finally_semantics:
-                    ops.append('SETUP_FINALLY')
-                    ops.append('POP_BLOCK')
-                if _BYTECODE.has_begin_finally:
-                    ops.append('BEGIN_FINALLY')
-                else:
-                    ops.append(('LOAD_CONST', data.get_const(None)))
+                # the following two opcodes needed just for pypy,
+                # but seem logical elsewhere too (enter/exit 'try')
+                ops.append('SETUP_FINALLY')
+                ops.append('POP_BLOCK')
+                ops.append('BEGIN_FINALLY' if
+                           _BYTECODE.has_begin_finally else
+                           ('LOAD_CONST', data.get_const(None)))
 
             elif block == '<EXCEPT>':
                 # we raise an exception to get the right block pushed
                 raise_ops = [('LOAD_CONST', data.get_const(None)),
                              ('RAISE_VARARGS', 1)]
 
-                setup_except = 'SETUP_EXCEPT' if _BYTECODE.has_setup_except else \
-                               'SETUP_FINALLY'
+                setup_except = ('SETUP_EXCEPT' if
+                                _BYTECODE.has_setup_except else
+                                'SETUP_FINALLY')
                 ops.append((setup_except, _get_instructions_size(raise_ops)))
                 ops += raise_ops
                 for _ in _range(3):
