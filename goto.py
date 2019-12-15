@@ -338,10 +338,7 @@ def _patch_code(code):
                 ops.append('POP_BLOCK')
                 if block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
                     ops.append('POP_TOP')
-            # END_FINALLY is required for pypy. (To pop special block)
-            # It is not clear at this point what will happen once
-            # pypy moves to py38, where there's no distinction between
-            # except and finally setups.
+            # END_FINALLY is needed only in pypy, but seems logical everywhere
             if block in ('SETUP_FINALLY', 'SETUP_WITH',
                          'SETUP_ASYNC_WITH'):
                 ops.append('BEGIN_FINALLY' if
