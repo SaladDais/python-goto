@@ -113,6 +113,7 @@ def test_jump_out_of_nested_2_loops():
 
     assert func() == (0, 0)
 
+
 def test_jump_out_of_nested_4_loops_and_survive():
     @with_goto
     def func():
@@ -126,6 +127,7 @@ def test_jump_out_of_nested_4_loops_and_survive():
         return (i, j, k, m, n)
 
     assert func() == (1, 0, 0, 0, 0)
+
 
 def test_large_jumps_in_diff_orders():
     @with_goto
@@ -160,6 +162,7 @@ def test_large_jumps_in_diff_orders():
 
     assert func() == (0,) * 15
 
+
 def test_jump_out_of_nested_11_loops():
     @with_goto
     def func():
@@ -189,6 +192,7 @@ def test_jump_out_of_nested_11_loops():
 
     assert func() == (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
+
 def test_jump_across_loops():
     def func():
         for i in range(10):
@@ -199,6 +203,7 @@ def test_jump_across_loops():
 
     pytest.raises(SyntaxError, with_goto, func)
 
+
 def test_jump_out_of_while_true_loop():
     @with_goto
     def func():
@@ -208,8 +213,9 @@ def test_jump_out_of_while_true_loop():
             goto .out
         label .out
         return i
-        
+
     assert func() == 1
+
 
 def test_jump_out_of_while_true_loop_and_survive():
     @with_goto
@@ -221,8 +227,9 @@ def test_jump_out_of_while_true_loop_and_survive():
                 goto .out
             label .out
         return i, j
-        
+
     assert func() == (9, 10)
+
 
 def test_jump_out_of_while_true_loop_and_live():
     @with_goto
@@ -235,8 +242,9 @@ def test_jump_out_of_while_true_loop_and_live():
                     goto .out
             label .out
         return i, j, k
-        
+
     assert func() == (9, 0, 10)
+
 
 def test_jump_out_of_while_loop_and_live():
     @with_goto
@@ -249,21 +257,26 @@ def test_jump_out_of_while_loop_and_live():
                     goto .out
             label .out
         return i, j, k
-        
+
     assert func() == (9, 3, 5)
+
 
 class Context:
     def __init__(self):
         self.enters = 0
         self.exits = 0
+
     def __enter__(self):
         self.enters += 1
         return self
+
     def __exit__(self, a, b, c):
         self.exits += 1
         return self
+
     def data(self):
         return (self.enters, self.exits)
+
 
 def test_jump_out_of_with_block():
     @with_goto
@@ -273,7 +286,8 @@ def test_jump_out_of_with_block():
         label .out
         return c.data()
 
-    assert func()== (1, 0)
+    assert func() == (1, 0)
+
 
 def test_jump_out_of_with_block_and_survive():
     @with_goto
@@ -286,6 +300,7 @@ def test_jump_out_of_with_block_and_survive():
         return (i, c.data())
 
     assert func() == (2, (3, 0))
+
 
 def test_jump_out_of_with_block_and_live():
     @with_goto
@@ -300,13 +315,16 @@ def test_jump_out_of_with_block_and_live():
 
     assert func() == (2, 0, (3, 0))
 
+
 def test_jump_into_with_block():
     def func():
         with Context() as c:
             label .block
         goto .block
+        return c
 
     pytest.raises(SyntaxError, with_goto, func)
+
 
 def test_generator():
     @with_goto
@@ -321,6 +339,7 @@ def test_generator():
         yield 5
 
     assert tuple(func()) == (0, 1, 4, 5)
+
 
 def test_jump_out_of_try_block():
     @with_goto
@@ -337,6 +356,7 @@ def test_jump_out_of_try_block():
 
     assert func() is None
 
+
 def test_jump_out_of_try_block_and_survive():
     @with_goto
     def func():
@@ -344,7 +364,7 @@ def test_jump_out_of_try_block_and_survive():
             try:
                 rv = None
                 goto .end
-            except:
+            except Exception:
                 rv = 'except'
             finally:
                 rv = 'finally'
@@ -352,6 +372,7 @@ def test_jump_out_of_try_block_and_survive():
         return (i, rv)
 
     assert func() == (9, None)
+
 
 def test_jump_out_of_try_block_and_live():
     @with_goto
@@ -361,7 +382,7 @@ def test_jump_out_of_try_block_and_live():
                 try:
                     rv = None
                     goto .end
-                except:
+                except Exception:
                     rv = 'except'
                 finally:
                     rv = 'finally'
@@ -369,6 +390,7 @@ def test_jump_out_of_try_block_and_live():
         return (i, j, rv)
 
     assert func() == (2, 2, None)
+
 
 def test_jump_into_try_block():
     def func():
@@ -386,7 +408,7 @@ def test_jump_out_of_except_block():
     def func():
         try:
             rv = 1 / 0
-        except:
+        except Exception:
             rv = 'except'
             goto .end
         finally:
@@ -396,6 +418,7 @@ def test_jump_out_of_except_block():
 
     assert func() == 'except'
 
+
 def test_jump_out_of_except_block_and_live():
     @with_goto
     def func():
@@ -403,7 +426,7 @@ def test_jump_out_of_except_block_and_live():
             for j in range(3):
                 try:
                     rv = 1 / 0
-                except:
+                except Exception:
                     rv = 'except'
                     goto .end
                 finally:
@@ -412,6 +435,7 @@ def test_jump_out_of_except_block_and_live():
         return (i, j, rv)
 
     assert func() == (2, 0, 'except')
+
 
 """def test_jump_into_except_block():
     def func():
@@ -423,6 +447,7 @@ def test_jump_out_of_except_block_and_live():
         goto .block
 
     pytest.raises(SyntaxError, with_goto, func)"""
+
 
 def test_jump_out_of_finally_block():
     @with_goto
@@ -437,6 +462,7 @@ def test_jump_out_of_finally_block():
         return rv
 
     assert func() == 'finally'
+
 
 def test_jump_out_of_finally_block_and_live():
     @with_goto
@@ -454,6 +480,7 @@ def test_jump_out_of_finally_block_and_live():
 
     assert func() == (2, 0, 'finally')
 
+
 def test_jump_out_of_try_in_except_in_finally_and_live():
     @with_goto
     def func():
@@ -465,12 +492,12 @@ def test_jump_out_of_try_in_except_in_finally_and_live():
                     rv = 'finally'
                     try:
                         rv = 1 / 0
-                    except:
+                    except Exception:
                         rv = 'except'
                         try:
                             rv = 'try'
                             goto .end
-                        except:
+                        except Exception:
                             rv = 'except2'
                         finally:
                             rv = 'finally2'
@@ -507,6 +534,7 @@ def test_function_is_copy():
     assert newfunc is not func
     assert newfunc.foo == 'bar'
 
+
 def test_code_is_not_copy():
     def outer_func():
         @with_goto
@@ -517,4 +545,3 @@ def test_code_is_not_copy():
 
     assert outer_func() is not outer_func()
     assert outer_func().__code__ is outer_func().__code__
-

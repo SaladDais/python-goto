@@ -7,11 +7,6 @@ import weakref
 import warnings
 
 try:
-    import __pypy__
-except:
-    __pypy__ = None
-
-try:
     _array_to_bytes = array.array.tobytes
 except AttributeError:
     _array_to_bytes = array.array.tostring
@@ -45,6 +40,12 @@ class _Bytecode:
         self.has_setup_with = 'SETUP_WITH' in dis.opmap
         self.has_setup_except = 'SETUP_EXCEPT' in dis.opmap
 
+        try:
+            import __pypy__  # noqa: F401
+            self.pypy_finally_semantics = True
+        except ImportError:
+            self.pypy_finally_semantics = False
+
     @property
     def argument_bits(self):
         return self.argument.size * 8
@@ -52,16 +53,19 @@ class _Bytecode:
 
 _BYTECODE = _Bytecode()
 
-_patched_code_cache = weakref.WeakKeyDictionary() # use a weak dictionary in case code objects can be garbage-collected
+
+# use a weak dictionary in case code objects can be garbage-collected
+_patched_code_cache = weakref.WeakKeyDictionary()
 try:
     _patched_code_cache[_Bytecode.__init__.__code__] = None
 except TypeError:
-    _patched_code_cache = {} # ...unless not supported
+    _patched_code_cache = {}  # ...unless not supported
+
 
 def _make_code(code, codestring):
     try:
-        return code.replace(co_code=codestring) # new in 3.8+
-    except:
+        return code.replace(co_code=codestring)  # new in 3.8+
+    except AttributeError:
         args = [
             code.co_argcount,  code.co_nlocals,     code.co_stacksize,
             code.co_flags,     codestring,          code.co_consts,
@@ -108,28 +112,6 @@ def _parse_instructions(code, yield_nones_at_end=0):
     for _ in range(yield_nones_at_end):
         yield (None, None, None)
 
-def _get_instruction_size(opname, oparg=0):
-    size = 1
-
-    extended_arg = oparg >> _BYTECODE.argument_bits
-    if extended_arg != 0:
-        size += _get_instruction_size('EXTENDED_ARG', extended_arg)
-        oparg &= (1 << _BYTECODE.argument_bits) - 1
-
-    opcode = dis.opmap[opname]
-    if opcode >= _BYTECODE.have_argument:
-        size += _BYTECODE.argument.size
-
-    return size
-
-def _get_instructions_size(ops):
-    size = 0
-    for op in ops:
-        if isinstance(op, str):
-            size += _get_instruction_size(op)
-        else:
-            size += _get_instruction_size(*op)
-    return size
 
 def _get_instruction_size(opname, oparg=0):
     size = 1
@@ -172,6 +154,7 @@ def _write_instruction(buf, pos, opname, oparg=0):
 
     return pos
 
+
 def _write_instructions(buf, pos, ops):
     for op in ops:
         if isinstance(op, str):
@@ -179,17 +162,11 @@ def _write_instructions(buf, pos, ops):
         else:
             pos = _write_instruction(buf, pos, *op)
     return pos
+
 
 def _warn_bug(msg):
-    warnings.warn("Internal error detected - result of with_goto may be incorrect. (%s)" % msg)
-
-def _write_instructions(buf, pos, ops):
-    for op in ops:
-        if isinstance(op, str):
-            pos = _write_instruction(buf, pos, op)
-        else:
-            pos = _write_instruction(buf, pos, *op)
-    return pos
+    warnings.warn("Internal error detected" +
+                  " - result of with_goto may be incorrect. (%s)" % msg)
 
 
 def _find_labels_and_gotos(code):
@@ -201,8 +178,8 @@ def _find_labels_and_gotos(code):
     block_exits = []
     last_block = None
 
-    opname0 = oparg0 = offset0 = None
-    opname1 = oparg1 = offset1 = None # the main one we're looking at each loop iteration
+    opname0 = None
+    opname1 = oparg1 = offset1 = None  # the one looked at each iteration
     opname2 = oparg2 = offset2 = None
     opname3 = oparg3 = offset3 = None
 
@@ -226,8 +203,10 @@ def _find_labels_and_gotos(code):
 
     def pop_block_of_type(type):
         if block_stack and block_stack[-1][0] != type:
-            # in 3.8, only finally blocks are supported, so we must determine the except/finally nature ourselves, and replace the block afterwards
-            if not _BYTECODE.has_setup_except and type == "<EXCEPT>" and block_stack[-1][0] == '<FINALLY>':
+            # in 3.8, only finally blocks are supported, so we must determine
+            # whether it's except/finally ourselves
+            if not _BYTECODE.has_setup_except and \
+               type == "<EXCEPT>" and block_stack[-1][0] == '<FINALLY>':
                 replace_block(block_stack[-1], (type, block_stack[-1][1]))
             else:
                 _warn_bug("mismatched block type")
@@ -239,11 +218,12 @@ def _find_labels_and_gotos(code):
         # check for block exits
         while block_exits and offset1 == block_exits[-1][-1]:
             block, counter, _ = block_exits.pop()
-            
-            # Necessary for FOR_ITER and sometimes needed for other blocks as well
+
+            # Necessary for FOR_ITER and sometimes needed for
+            # other blocks as well
             if block_stack and (block, counter) == block_stack[-1][:2]:
                 last_block = pop_block()
-            
+
             if block == 'SETUP_EXCEPT' and _BYTECODE.has_pop_except:
                 block_counter += 1
                 block_stack.append(('<EXCEPT>', block_counter))
@@ -268,9 +248,9 @@ def _find_labels_and_gotos(code):
                                   offset4,
                                   oparg2,
                                   list(block_stack)))
-        elif opname1 in ('SETUP_LOOP',
-                         'SETUP_EXCEPT', 'SETUP_FINALLY',
-                         'SETUP_WITH', 'SETUP_ASYNC_WITH') or \
+        elif (opname1 in ('SETUP_LOOP',
+                          'SETUP_EXCEPT', 'SETUP_FINALLY',
+                          'SETUP_WITH', 'SETUP_ASYNC_WITH')) or \
              (not _BYTECODE.has_loop_blocks and opname1 == 'FOR_ITER'):
             block_counter += 1
             block_stack.append((opname1, block_counter))
@@ -280,15 +260,19 @@ def _find_labels_and_gotos(code):
         elif opname1 == 'POP_EXCEPT':
             last_block = pop_block_of_type('<EXCEPT>')
         elif opname1 == 'END_FINALLY':
-            if opname0 != 'JUMP_FORWARD': # hack for dummy end-finally in except block (correct fix would be a jump-aware reading of instructions!)
+            # hack for dummy end-finally in except block
+            # (correct fix would be a jump-aware reading of instructions!)
+            if opname0 != 'JUMP_FORWARD':
                 last_block = pop_block_of_type('<FINALLY>')
         elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START'):
             if _BYTECODE.has_setup_with:
-                block_stack.append(('<FINALLY>', -1)) # temporary block to match END_FINALLY
+                # temporary block to match END_FINALLY
+                block_stack.append(('<FINALLY>', -1))
             else:
-                replace_block(last_block, ('SETUP_WITH',) + last_block[1:]) # python 2.6 - finally was actually with
+                # python 2.6 - finally was actually with
+                replace_block(last_block, ('SETUP_WITH',) + last_block[1:])
 
-        opname0, oparg0, offset0 = opname1, oparg1, offset1
+        opname0 = opname1
         opname1, oparg1, offset1 = opname2, oparg2, offset2
         opname2, oparg2, offset2 = opname3, oparg3, offset3
         opname3, oparg3, offset3 = opname4, oparg4, offset4
@@ -341,8 +325,13 @@ def _patch_code(code):
                 ops.append('POP_BLOCK')
                 if block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
                     ops.append('POP_TOP')
-                 # pypy 3.6 keeps a block around until END_FINALLY; python 3.8 reuses SETUP_FINALLY for SETUP_EXCEPT (where END_FINALLY is not accepted). What will pypy 3.8 do?
-                if __pypy__ and block in ('SETUP_FINALLY', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
+                # pypy 3.6 keeps a block around until END_FINALLY
+                # python 3.8 reuses SETUP_FINALLY for SETUP_EXCEPT
+                # (where END_FINALLY is not accepted).
+                # What will pypy 3.8 do?
+                if _BYTECODE.pypy_finally_semantics and \
+                   block in ('SETUP_FINALLY', 'SETUP_WITH',
+                             'SETUP_ASYNC_WITH'):
                     ops.append(('LOAD_CONST', code.co_consts.index(None)))
                     ops.append('END_FINALLY')
         ops.append(('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit))
