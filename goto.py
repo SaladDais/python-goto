@@ -114,6 +114,31 @@ def _get_instructions_size(ops):
             size += _get_instruction_size(*op)
     return size
 
+def _get_instruction_size(opname, oparg=0):
+    size = 1
+
+    extended_arg = oparg >> _BYTECODE.argument_bits
+    if extended_arg != 0:
+        size += _get_instruction_size('EXTENDED_ARG', extended_arg)
+        oparg &= (1 << _BYTECODE.argument_bits) - 1
+
+    opcode = dis.opmap[opname]
+    if opcode >= _BYTECODE.have_argument:
+        size += _BYTECODE.argument.size
+
+    return size
+
+
+def _get_instructions_size(ops):
+    size = 0
+    for op in ops:
+        if isinstance(op, str):
+            size += _get_instruction_size(op)
+        else:
+            size += _get_instruction_size(*op)
+    return size
+
+
 def _write_instruction(buf, pos, opname, oparg=0):
     extended_arg = oparg >> _BYTECODE.argument_bits
     if extended_arg != 0:
@@ -137,6 +162,15 @@ def _write_instructions(buf, pos, ops):
         else:
             pos = _write_instruction(buf, pos, *op)
     return pos
+
+def _write_instructions(buf, pos, ops):
+    for op in ops:
+        if isinstance(op, str):
+            pos = _write_instruction(buf, pos, op)
+        else:
+            pos = _write_instruction(buf, pos, *op)
+    return pos
+
 
 def _find_labels_and_gotos(code):
     labels = {}
@@ -211,11 +245,13 @@ def _patch_code(code):
             raise SyntaxError('Jump into different block')
 
         ops = []
-        for block, _ in origin_stack[target_depth:]:
+
+        for block, _ in reversed(origin_stack[target_depth:]):
             if block == 'FOR_ITER':
                 ops.append('POP_TOP')
             else:
                 ops.append('POP_BLOCK')
+
         ops.append(('JUMP_ABSOLUTE', target // _BYTECODE.jump_unit))
 
         if pos + _get_instructions_size(ops) > end:

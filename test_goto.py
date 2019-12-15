@@ -83,6 +83,7 @@ def test_jump_into_loop():
 
     pytest.raises(SyntaxError, with_goto, func)
 
+
 def test_jump_out_of_nested_2_loops():
     @with_goto
     def func():
@@ -99,6 +100,7 @@ def test_jump_out_of_nested_2_loops():
         return (i, j)
 
     assert func() == (0, 0)
+
 
 def test_jump_out_of_nested_11_loops():
     @with_goto
@@ -117,15 +119,11 @@ def test_jump_out_of_nested_11_loops():
                                                 for i11 in range(2):
                                                     # These are more than
                                                     # 256 bytes of bytecode
-                                                    x += (x+x+x+x+x+x+x+x+x+
-                                                          x+x+x+x+x+x+x+x+x+
-                                                          x+x+x+x+x+x+x+x+x)
-                                                    x += (x+x+x+x+x+x+x+x+x+
-                                                          x+x+x+x+x+x+x+x+x+
-                                                          x+x+x+x+x+x+x+x+x)
-                                                    x += (x+x+x+x+x+x+x+x+x+
-                                                          x+x+x+x+x+x+x+x+x+
-                                                          x+x+x+x+x+x+x+x+x)
+                                                    x += x+x+x+x+x+x+x+x+x+x+x
+                                                    x += x+x+x+x+x+x+x+x+x+x+x
+                                                    x += x+x+x+x+x+x+x+x+x+x+x
+                                                    x += x+x+x+x+x+x+x+x+x+x+x
+                                                    x += x+x+x+x+x+x+x+x+x+x+x
 
                                                     goto .end
         label .end
