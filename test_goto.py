@@ -339,6 +339,79 @@ def test_generator():
         yield 5
 
     assert tuple(func()) == (0, 1, 4, 5)
+def test_generator():
+    @with_goto
+    def func():
+        yield 0
+        yield 1
+        goto .x
+        yield 2
+        yield 3
+        label .x
+        yield 4
+        yield 5
+
+    assert tuple(func()) == (0, 1, 4, 5)
+
+
+def test_jump_out_of_try_except_block():
+    @with_goto
+    def func():
+        try:
+            rv = None
+            goto .end
+        except Exception:
+            rv = 'except'
+        label .end
+        return rv
+
+    assert func() == None
+
+
+def test_jump_out_of_try_except_block_and_live():
+    @with_goto
+    def func():
+        for i in range(3):
+            for j in range(3):
+                try:
+                    rv = None
+                    goto .end
+                except Exception:
+                    rv = 'except'
+                label .end
+        return (i, j, rv)
+
+    assert func() == (2, 2, None)
+
+
+def test_jump_out_of_try_finally_block():
+    @with_goto
+    def func():
+        try:
+            rv = None
+            goto .end
+        finally:
+            rv = 'finally'
+        label .end
+        return rv
+
+    assert func() == None
+
+
+def test_jump_out_of_try_finally_block_and_live():
+    @with_goto
+    def func():
+        for i in range(3):
+            for j in range(3):
+                try:
+                    rv = None
+                    goto .end
+                finally:
+                    rv = 'finally'
+                label .end
+        return (i, j, rv)
+
+    assert func() == (2, 2, None)
 
 
 def test_jump_out_of_try_block():
@@ -403,6 +476,36 @@ def test_jump_into_try_block():
     pytest.raises(SyntaxError, with_goto, func)
 
 
+def test_jump_out_of_except_block_wo_finally():
+    @with_goto
+    def func():
+        try:
+            rv = 1 / 0
+        except Exception:
+            rv = 'except'
+            goto .end
+        label .end
+        return rv
+
+    assert func() == 'except'
+
+
+def test_jump_out_of_except_block_wo_finally_and_live():
+    @with_goto
+    def func():
+        for i in range(3):
+            for j in range(3):
+                try:
+                    rv = 1 / 0
+                except Exception:
+                    rv = 'except'
+                    goto .end
+            label .end
+        return (i, j, rv)
+
+    assert func() == (2, 0, 'except')
+
+
 def test_jump_out_of_except_block():
     @with_goto
     def func():
@@ -437,6 +540,24 @@ def test_jump_out_of_except_block_and_live():
     assert func() == (2, 0, 'except')
 
 
+def test_jump_out_of_bare_except_block_and_live():
+    @with_goto
+    def func():
+        for i in range(3):
+            for j in range(3):
+                try:
+                    rv = 1 / 0
+                except:
+                    rv = 'except'
+                    goto .end
+                finally:
+                    rv = 'finally'
+            label .end
+        return (i, j, rv)
+
+    assert func() == (2, 0, 'except')
+
+
 """def test_jump_into_except_block():
     def func():
         try:
@@ -447,6 +568,42 @@ def test_jump_out_of_except_block_and_live():
         goto .block
 
     pytest.raises(SyntaxError, with_goto, func)"""
+
+
+def test_jump_out_of_finally_block_w_except():
+    @with_goto
+    def func():
+        try:
+            rv = None
+        except Exception:
+            rv = 'except'
+        finally:
+            rv = 'finally'
+            goto .end
+            rv = 'end'
+        label .end
+        return rv
+
+    assert func() == 'finally'
+
+
+def test_jump_out_of_finally_block_w_except_and_live():
+    @with_goto
+    def func():
+        for i in range(3):
+            for j in range(3):
+                try:
+                    rv = None
+                except Exception:
+                    rv = 'except'
+                finally:
+                    rv = 'finally'
+                    goto .end
+                    rv = 'end'
+            label .end
+        return i, j, rv
+
+    assert func() == (2, 0, 'finally')
 
 
 def test_jump_out_of_finally_block():

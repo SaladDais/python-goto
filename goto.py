@@ -178,7 +178,6 @@ def _find_labels_and_gotos(code):
     block_exits = []
     last_block = None
 
-    opname0 = None
     opname1 = oparg1 = offset1 = None  # the one looked at each iteration
     opname2 = oparg2 = offset2 = None
     opname3 = oparg3 = offset3 = None
@@ -203,13 +202,18 @@ def _find_labels_and_gotos(code):
 
     def pop_block_of_type(type):
         if block_stack and block_stack[-1][0] != type:
-            # in 3.8, only finally blocks are supported, so we must determine
-            # whether it's except/finally ourselves
             if not _BYTECODE.has_setup_except and \
                type == "<EXCEPT>" and block_stack[-1][0] == '<FINALLY>':
+                # in 3.8, only finally blocks are supported, so we must
+                # determine whether it's except/finally ourselves
                 replace_block(block_stack[-1], (type, block_stack[-1][1]))
+            elif type == "<FINALLY>":
+                # Python puts END_FINALLY at the very end of except
+                # clauses, so we must ignore it. 
+                return
             else:
                 _warn_bug("mismatched block type")
+                return  # better not to pop (a tiny bit)
         return pop_block()
 
     for opname4, oparg4, offset4 in _parse_instructions(code.co_code, 3):
@@ -260,10 +264,7 @@ def _find_labels_and_gotos(code):
         elif opname1 == 'POP_EXCEPT':
             last_block = pop_block_of_type('<EXCEPT>')
         elif opname1 == 'END_FINALLY':
-            # hack for dummy end-finally in except block
-            # (correct fix would be a jump-aware reading of instructions!)
-            if opname0 != 'JUMP_FORWARD':
-                last_block = pop_block_of_type('<FINALLY>')
+            last_block = pop_block_of_type('<FINALLY>')
         elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START'):
             if _BYTECODE.has_setup_with:
                 # temporary block to match END_FINALLY
@@ -272,7 +273,6 @@ def _find_labels_and_gotos(code):
                 # python 2.6 - finally was actually with
                 replace_block(last_block, ('SETUP_WITH',) + last_block[1:])
 
-        opname0 = opname1
         opname1, oparg1, offset1 = opname2, oparg2, offset2
         opname2, oparg2, offset2 = opname3, oparg3, offset3
         opname3, oparg3, offset3 = opname4, oparg4, offset4
