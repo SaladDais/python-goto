@@ -1,4 +1,3 @@
-import sys
 import pytest
 from goto import with_goto
 
@@ -329,14 +328,14 @@ def test_jump_out_of_try_block():
         try:
             rv = None
             goto .end
-        except:
+        except Exception:
             rv = 'except'
         finally:
             rv = 'finally'
         label .end
         return rv
 
-    assert func() == None
+    assert func() is None
 
 def test_jump_out_of_try_block_and_survive():
     @with_goto
@@ -375,7 +374,7 @@ def test_jump_into_try_block():
     def func():
         try:
             label .block
-        except:
+        except Exception:
             pass
         goto .block
 
