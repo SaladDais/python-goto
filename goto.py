@@ -45,6 +45,7 @@ class _Bytecode:
         self.has_setup_with = 'SETUP_WITH' in dis.opmap
         self.has_setup_except = 'SETUP_EXCEPT' in dis.opmap
         self.has_begin_finally = 'BEGIN_FINALLY' in dis.opmap
+        self.has_end_async_for = 'END_ASYNC_FOR' in dis.opmap
 
     @property
     def argument_bits(self):
@@ -221,6 +222,12 @@ class _BlockStack(object):
 
     def top(self):
         return self.stack[-1] if self.stack else None
+    
+    def top_of_type(self, type):
+        if self.stack and self.top()[0] != type:
+            _warn_bug("mismatched block type")
+        else:
+            return self.top()
 
     def __len__(self):
         return len(self.stack)
@@ -296,6 +303,18 @@ def _find_labels_and_gotos(code):
             # clauses, so we must ignore it in the wrong place.
             if block_stack and block_stack.top()[0] == '<FINALLY>':
                 block_stack.pop_of_type('<FINALLY>')
+        elif opname1 == 'END_ASYNC_FOR':
+            # finally is actually an async-for
+            top_block = block_stack.pop_of_type('<FINALLY>')
+            if top_block:
+                _, _, setup_block, _ = top_block
+                block_stack.replace(setup_block,
+                                    ('<ASYNC_FOR>',) + top_block[1:])
+        elif opname1 == 'GET_AITER' and not _BYTECODE.has_end_async_for:
+            top_block = block_stack.top_of_type('SETUP_LOOP')
+            if top_block:
+                # loop is an async for, so add a fake block for it
+                block_stack.push('<ASYNC_FOR>', top_block[1])
         elif opname1 in ('WITH_CLEANUP', 'WITH_CLEANUP_START'):
             if _BYTECODE.has_setup_with:
                 # temporary block to match END_FINALLY
@@ -415,7 +434,7 @@ def _patch_code(code):
 
         # pop blocks
         for block, _, _, _ in reversed(origin_stack[common_depth:]):
-            if block == 'FOR_ITER':
+            if block in ('FOR_ITER', '<ASYNC_FOR>'):
                 if not _BYTECODE.has_loop_blocks:
                     ops.append('POP_TOP')
             elif block == '<EXCEPT>':
@@ -447,7 +466,7 @@ def _patch_code(code):
 
         tuple_i = 0
         for block, block_target, _, _ in target_stack[common_depth:]:
-            if block in ('FOR_ITER', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
+            if block in ('FOR_ITER', '<ASYNC_FOR>', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
                 if not params:
                     raise SyntaxError(
                         'Jump into block without the necessary params')
@@ -463,12 +482,23 @@ def _patch_code(code):
                     # convenience, and prevents FOR_ITER from crashing
                     # on non-iter objects. (this is a no-op for iterators)
                     ops.append('GET_ITER')
+                    
+                elif block == '<ASYNC_FOR>':
+                    # for simplicity, we do not rely on GET_AITER (the
+                    # semantics of which depend on python version),
+                    # and instead use __aiter__ directly.
+                    # This means that __aiter__'s that return awaitables
+                    # are not supported by us.  
+                    ops.append(('LOAD_ATTR', data.get_name("__aiter__")))
+                    ops.append(("CALL_FUNCTION", 0))
 
                 elif block in ('SETUP_WITH', 'SETUP_ASYNC_WITH'):
                     # SETUP_WITH executes __enter__ and so would be
                     # inappropriate
                     # (a goto must bypass any and all side-effects)
-                    ops.append(('LOAD_ATTR', data.get_name('__exit__')))
+                    exit_name = ('__exit__' if block == 'SETUP_WITH' else
+                                 '__aexit__')
+                    ops.append(('LOAD_ATTR', data.get_name(exit_name)))
                     setup_block_absolute('SETUP_FINALLY', block_target)
 
             elif block in ('SETUP_LOOP', 'SETUP_EXCEPT', 'SETUP_FINALLY'):

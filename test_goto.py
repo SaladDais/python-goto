@@ -1,3 +1,4 @@
+import sys
 import pytest
 from goto import with_goto
 
@@ -1173,3 +1174,8 @@ def test_code_is_not_copy():
 
     assert outer_func() is not outer_func()
     assert outer_func().__code__ is outer_func().__code__
+
+if sys.version_info >= (3, 5):
+    # add async tests
+    from async_test_goto import *
+    
