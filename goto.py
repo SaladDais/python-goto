@@ -222,7 +222,7 @@ class _BlockStack(object):
 
     def top(self):
         return self.stack[-1] if self.stack else None
-    
+
     def top_of_type(self, type):
         if self.stack and self.top()[0] != type:
             _warn_bug("mismatched block type")
@@ -466,7 +466,8 @@ def _patch_code(code):
 
         tuple_i = 0
         for block, block_target, _, _ in target_stack[common_depth:]:
-            if block in ('FOR_ITER', '<ASYNC_FOR>', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
+            if block in ('FOR_ITER', '<ASYNC_FOR>',
+                         'SETUP_WITH', 'SETUP_ASYNC_WITH'):
                 if not params:
                     raise SyntaxError(
                         'Jump into block without the necessary params')
@@ -482,13 +483,13 @@ def _patch_code(code):
                     # convenience, and prevents FOR_ITER from crashing
                     # on non-iter objects. (this is a no-op for iterators)
                     ops.append('GET_ITER')
-                    
+
                 elif block == '<ASYNC_FOR>':
                     # for simplicity, we do not rely on GET_AITER (the
                     # semantics of which depend on python version),
                     # and instead use __aiter__ directly.
                     # This means that __aiter__'s that return awaitables
-                    # are not supported by us.  
+                    # are not supported by us.
                     ops.append(('LOAD_ATTR', data.get_name("__aiter__")))
                     ops.append(("CALL_FUNCTION", 0))
 
