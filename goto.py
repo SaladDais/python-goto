@@ -1,3 +1,6 @@
+# Lightly modified version of https://github.com/insignification/python-goto
+# this is public domain / CC0 / 0BSD / whatever is legal in the EU.
+
 import dis
 import struct
 import array
@@ -11,13 +14,10 @@ try:
 except AttributeError:
     _array_to_bytes = array.array.tostring
 
-try:
-    _range = xrange
-except NameError:
-    _range = range
 
 class _Bytecode:
     def __init__(self):
+        x, y = None, None
         code = (lambda: x if x else y).__code__.co_code
         opcode, oparg = struct.unpack_from('BB', code, 2)
 
@@ -48,7 +48,7 @@ class _Bytecode:
         try:
             import __pypy__
             self.pypy_finally_semantics = True
-        except:
+        except ImportError:
             self.pypy_finally_semantics = False
 
     @property
@@ -63,7 +63,8 @@ _patched_code_cache = weakref.WeakKeyDictionary()
 try:
     _patched_code_cache[_Bytecode.__init__.__code__] = None
 except TypeError:
-    _patched_code_cache = {} # ...unless not supported
+    _patched_code_cache = {}  # ...unless not supported
+
 
 def _make_code(code, codestring, data):
     try:
@@ -75,11 +76,11 @@ def _make_code(code, codestring, data):
                             co_names=data.names)
     except:
         args = [
-            code.co_argcount,  data.nlocals,        code.co_stacksize,
-            code.co_flags,     codestring,          data.consts,
-            data.names,        data.varnames,       code.co_filename,
-            code.co_name,      code.co_firstlineno, code.co_lnotab,
-            code.co_freevars,  code.co_cellvars
+            code.co_argcount, data.nlocals, code.co_stacksize,
+            code.co_flags, codestring, data.consts,
+            data.names, data.varnames, code.co_filename,
+            code.co_name, code.co_firstlineno, code.co_lnotab,
+            code.co_freevars, code.co_cellvars
         ]
 
         try:
@@ -115,10 +116,11 @@ def _parse_instructions(code, yield_nones_at_end=0):
 
         extended_arg = 0
         extended_arg_offset = None
-        yield (dis.opname[opcode], oparg, offset)
+        yield dis.opname[opcode], oparg, offset
 
-    for _ in _range(yield_nones_at_end):
-        yield (None, None, None)
+    for _ in range(yield_nones_at_end):
+        yield None, None, None
+
 
 def _get_instruction_size(opname, oparg=0):
     size = 1
@@ -134,6 +136,7 @@ def _get_instruction_size(opname, oparg=0):
 
     return size
 
+
 def _get_instructions_size(ops):
     size = 0
     for op in ops:
@@ -142,6 +145,7 @@ def _get_instructions_size(ops):
         else:
             size += _get_instruction_size(*op)
     return size
+
 
 def _write_instruction(buf, pos, opname, oparg=0):
     extended_arg = oparg >> _BYTECODE.argument_bits
@@ -159,6 +163,7 @@ def _write_instruction(buf, pos, opname, oparg=0):
 
     return pos
 
+
 def _write_instructions(buf, pos, ops):
     for op in ops:
         if isinstance(op, str):
@@ -167,9 +172,11 @@ def _write_instructions(buf, pos, ops):
             pos = _write_instruction(buf, pos, *op)
     return pos
 
+
 def _warn_bug(msg):
-    warnings.warn("Internal error detected" +
-                  " - result of with_goto may be incorrect. (%s)" % msg)
+    warnings.warn("Internal error detected"
+                  + " - result of with_goto may be incorrect. (%s)" % msg)
+
 
 def _find_labels_and_gotos(code):
     labels = {}
@@ -190,15 +197,15 @@ def _find_labels_and_gotos(code):
 
     def replace_block(old_block, new_block):
         replace_block_in_stack(block_stack, old_block, new_block)
-        for label in labels:
-            replace_block_in_stack(labels[label][2], old_block, new_block)
-        for goto in gotos:
-            replace_block_in_stack(goto[3], old_block, new_block)
+        for label_target in labels:
+            replace_block_in_stack(labels[label_target][2], old_block, new_block)
+        for g in gotos:
+            replace_block_in_stack(g[3], old_block, new_block)
 
     def push_block(opname, target_offset=None):
         new_counter = block_counter + 1
         block_stack.append((opname, target_offset, new_counter))
-        return new_counter # to be assigned to block_counter
+        return new_counter  # to be assigned to block_counter
 
     def pop_block():
         if block_stack:
@@ -206,14 +213,14 @@ def _find_labels_and_gotos(code):
         else:
             _warn_bug("can't pop block")
 
-    def pop_block_of_type(type):
-        if block_stack and block_stack[-1][0] != type:
+    def pop_block_of_type(typ):
+        if block_stack and block_stack[-1][0] != typ:
             # in 3.8, only finally blocks are supported, so we must determine
             # except/finally ourselves, and replace the block's type
             if not _BYTECODE.has_setup_except and \
-               type == "<EXCEPT>" and \
-               block_stack[-1][0] == '<FINALLY>':
-                replace_block(block_stack[-1], (type,) + block_stack[-1][1:])
+                    typ == "<EXCEPT>" and \
+                    block_stack[-1][0] == '<FINALLY>':
+                replace_block(block_stack[-1], (typ,) + block_stack[-1][1:])
             else:
                 _warn_bug("mismatched block type")
         return pop_block()
@@ -255,7 +262,7 @@ def _find_labels_and_gotos(code):
                                   0))
             elif opname2 == 'LOAD_ATTR' and opname3 == 'STORE_ATTR':
                 if code.co_names[oparg1] == 'goto' and \
-                   code.co_names[oparg2] in ('param', 'params'):
+                        code.co_names[oparg2] in ('param', 'params'):
                     gotos.append((offset1,
                                   offset4,
                                   oparg3,
@@ -299,6 +306,7 @@ def _inject_nop_sled(buf, pos, end):
     while pos < end:
         pos = _write_instruction(buf, pos, 'NOP')
 
+
 def _inject_ops(buf, pos, end, ops):
     size = _get_instructions_size(ops)
 
@@ -320,6 +328,7 @@ def _inject_ops(buf, pos, end, ops):
     else:
         pos = _write_instructions(buf, pos, ops)
         _inject_nop_sled(buf, pos, end)
+
 
 class _CodeData:
     def __init__(self, code):
@@ -350,6 +359,7 @@ class _CodeData:
         self.nlocals += 1
         return idx
 
+
 def _patch_code(code):
     new_code = _patched_code_cache.get(code)
     if new_code is not None:
@@ -358,23 +368,24 @@ def _patch_code(code):
     labels, gotos = _find_labels_and_gotos(code)
     buf = array.array('B', code.co_code)
     temp_var = None
+    many_params = False
 
     data = _CodeData(code)
 
     for pos, end, _ in labels.values():
         _inject_nop_sled(buf, pos, end)
 
-    for pos, end, label, origin_stack, params in gotos:
+    for pos, end, label_target, origin_stack, params in gotos:
         try:
-            _, target, target_stack = labels[label]
+            _, target, target_stack = labels[label_target]
         except KeyError:
-            raise SyntaxError('Unknown label {0!r}'.format(code.co_names[label]))
+            raise SyntaxError('Unknown label {0!r}'.format(code.co_names[label_target]))
 
         ops = []
 
         # prepare
         common_depth = min(len(origin_stack), len(target_stack))
-        for i in _range(common_depth):
+        for i in range(common_depth):
             if origin_stack[i] != target_stack[i]:
                 common_depth = i
                 break
@@ -405,8 +416,8 @@ def _patch_code(code):
                 # (where END_FINALLY is not accepted).
                 # What will pypy 3.8 do?
                 if _BYTECODE.pypy_finally_semantics and \
-                   block in ('SETUP_FINALLY', 'SETUP_WITH',
-                             'SETUP_ASYNC_WITH'):
+                        block in ('SETUP_FINALLY', 'SETUP_WITH',
+                                  'SETUP_ASYNC_WITH'):
                     if _BYTECODE.has_begin_finally:
                         ops.append('BEGIN_FINALLY')
                     else:
@@ -414,13 +425,13 @@ def _patch_code(code):
                     ops.append('END_FINALLY')
 
         # push blocks
-        def setup_block_absolute(block, block_end):
+        def setup_block_absolute(block_offset, block_end):
             # there's no SETUP_*_ABSOLUTE, so we setup forward to an JUMP_ABSOLUTE
             jump_abs_op = ('JUMP_ABSOLUTE', block_end)
             skip_jump_op = ('JUMP_FORWARD', _get_instruction_size(*jump_abs_op))
-            setup_block_op = (block, _get_instruction_size(*skip_jump_op))
+            setup_block_op = (block_offset, _get_instruction_size(*skip_jump_op))
             ops.extend((setup_block_op, skip_jump_op, jump_abs_op))
-        
+
         tuple_i = 0
         for block, block_target, _ in target_stack[common_depth:]:
             if block in ('FOR_ITER', 'SETUP_WITH', 'SETUP_ASYNC_WITH'):
@@ -465,10 +476,10 @@ def _patch_code(code):
                              ('RAISE_VARARGS', 1)]
 
                 setup_except = 'SETUP_EXCEPT' if _BYTECODE.has_setup_except else \
-                               'SETUP_FINALLY'
+                    'SETUP_FINALLY'
                 ops.append((setup_except, _get_instructions_size(raise_ops)))
                 ops += raise_ops
-                for _ in _range(3):
+                for _ in range(3):
                     ops.append("POP_TOP")
 
             else:
@@ -498,3 +509,15 @@ def with_goto(func_or_code):
         ),
         func_or_code
     )
+
+
+class _CatchAll:
+    __slots__ = []
+
+    def __getattribute__(self, item):
+        raise RuntimeError("Unpatched goto for " + item)
+
+
+# Not strictly necessary, but stops linters from freaking out.
+label = _CatchAll()
+goto = _CatchAll()

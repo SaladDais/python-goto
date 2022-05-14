@@ -17,7 +17,7 @@ pip install goto-statement
 ## Usage
 
 ```python
-from goto import with_goto
+from goto import with_goto, goto, label
 
 @with_goto
 def range(start, stop):

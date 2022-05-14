@@ -1,6 +1,6 @@
 import sys
 import pytest
-from goto import with_goto
+from goto import with_goto, label, goto
 
 NonConstFalse = False
 
@@ -248,7 +248,7 @@ def test_large_jumps_in_diff_orders():
 
         if NonConstFalse:
             label .finalle
-            return (i, j, k, m, n, i1, j1, k1, m1, n1, i2, j2, k2, m2, n2)
+            return (i, j, k, m, n, i1, j1, k1, m1, n1, i2, j2, k2, m2, n2)  # noqa
 
         label .start
         for i in range(2):
@@ -386,6 +386,7 @@ def test_jump_out_of_while_true_loop_and_live():
     @with_goto
     def func():
         k = 0
+        j = 0
         for i in range(10):
             for j in range(10):
                 while True:
@@ -959,6 +960,7 @@ def test_jump_with_for_continue(): # to see it doesn't confuse parser
 def test_jump_with_for_return(): # to see it doesn't confuse parser
     @with_goto
     def func():
+        i = 0
         for i in range(4):
             goto .x
             return
