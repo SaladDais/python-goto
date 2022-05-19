@@ -3,6 +3,7 @@ import pytest
 from goto import with_goto, label, goto
 
 NonConstFalse = False
+NonConstTrue = True
 
 CODE = '''\
 i = 0
@@ -192,6 +193,7 @@ def test_jump_into_2_loops_and_live():
 
     assert func() == (2, 11 + 6)
 
+@pytest.mark.xfail(sys.version_info >= (3, 10), reason="Elimination of code after raise")
 def test_jump_out_then_back_in_for_loop_and_survive():
     @with_goto
     def func():
@@ -359,6 +361,7 @@ def test_jump_into_with_unneeded_params_and_live():
 
     assert func() == (9, 0)
 
+@pytest.mark.xfail(sys.version_info >= (3, 10), reason="Dead code elimination after inescapable loop")
 def test_jump_out_of_while_true_loop():
     @with_goto
     def func():
@@ -371,12 +374,51 @@ def test_jump_out_of_while_true_loop():
 
     assert func() == 1
 
+def test_jump_out_of_while_nonconsttrue_loop():
+    @with_goto
+    def func():
+        i = 0
+        while NonConstTrue:
+            i += 1
+            goto .out
+        label .out
+        return i
+
+    assert func() == 1
+
+def test_jump_out_of_while_true_loop_with_trailing_break():
+    @with_goto
+    def func():
+        i = 0
+        while True:
+            i += 1
+            goto .out
+            break
+        label .out
+        return i
+
+    assert func() == 1
+
+@pytest.mark.xfail(sys.version_info >= (3, 10), reason="Dead code elimination after inescapable loop")
 def test_jump_out_of_while_true_loop_and_survive():
     @with_goto
     def func():
         j = 0
         for i in range(10):
             while True:
+                j += 1
+                goto .out
+            label .out
+        return i, j
+
+    assert func() == (9, 10)
+
+def test_jump_out_of_while_nonconsttrue_loop_and_survive():
+    @with_goto
+    def func():
+        j = 0
+        for i in range(10):
+            while NonConstTrue:
                 j += 1
                 goto .out
             label .out
@@ -427,7 +469,7 @@ def test_jump_into_while_true_loop():
         return x
     
     assert func() == 1
-        
+
 def test_jump_into_while_true_loop_and_survive():
     @with_goto
     def func():
@@ -482,7 +524,7 @@ class Context:
     def data(self):
         return (self.enters, self.exits)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_with_block():
     @with_goto
     def func():
@@ -493,7 +535,7 @@ def test_jump_out_of_with_block():
 
     assert func()== (1, 0)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_with_block_and_survive():
     @with_goto
     def func():
@@ -506,7 +548,7 @@ def test_jump_out_of_with_block_and_survive():
 
     assert func() == (2, (3, 0))
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_with_block_and_live():
     @with_goto
     def func():
@@ -520,7 +562,7 @@ def test_jump_out_of_with_block_and_live():
 
     assert func() == (2, 0, (3, 0))
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_with_block_without_params():
     def func():
         with Context() as c:
@@ -529,7 +571,7 @@ def test_jump_into_with_block_without_params():
 
     pytest.raises(SyntaxError, with_goto, func)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_with_block_with_param():
     @with_goto
     def func():
@@ -541,7 +583,7 @@ def test_jump_into_with_block_with_param():
 
     assert func() == (0, 1)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_with_block_with_params():
     @with_goto
     def func():
@@ -553,7 +595,7 @@ def test_jump_into_with_block_with_params():
 
     assert func() == (0, 1)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_with_block_and_survive():
     @with_goto
     def func():
@@ -566,7 +608,7 @@ def test_jump_into_with_block_and_survive():
 
     assert func() == (9, (0, 10))
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_with_block_with_bad_params():
     @with_goto
     def func():
@@ -576,7 +618,7 @@ def test_jump_into_with_block_with_bad_params():
 
     pytest.raises(AttributeError, func)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_with_block_with_bad_exit_params():
     class BadAttr:
         __exit__ = 123
@@ -589,7 +631,7 @@ def test_jump_into_with_block_with_bad_exit_params():
 
     pytest.raises(TypeError, func)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_then_in_with_block_and_survive():
     @with_goto
     def func():
@@ -610,7 +652,7 @@ def test_jump_out_then_in_with_block_and_survive():
 
     assert func() == (9, 10, (10, 10))
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_then_in_2_nested_with_blocks_and_survive():
     @with_goto
     def func():
@@ -648,7 +690,7 @@ def test_generator():
 
     assert tuple(func()) == (0, 1, 4, 5)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_try_except_block():
     @with_goto
     def func():
@@ -662,7 +704,7 @@ def test_jump_out_of_try_except_block():
 
     assert func() == None
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_try_finally_block():
     @with_goto
     def func():
@@ -676,7 +718,7 @@ def test_jump_out_of_try_finally_block():
 
     assert func() == None
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_try_block():
     @with_goto
     def func():
@@ -692,7 +734,7 @@ def test_jump_out_of_try_block():
 
     assert func() == None
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_try_block_and_survive():
     @with_goto
     def func():
@@ -709,7 +751,7 @@ def test_jump_out_of_try_block_and_survive():
 
     assert func() == (9, None)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_try_block_and_live():
     @with_goto
     def func():
@@ -727,7 +769,7 @@ def test_jump_out_of_try_block_and_live():
 
     assert func() == (2, 2, None)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_try_block():
     @with_goto
     def func():
@@ -744,7 +786,7 @@ def test_jump_into_try_block():
 
     assert func() == 3
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_try_except_block_and_survive():
     @with_goto
     def func():
@@ -760,7 +802,7 @@ def test_jump_into_try_except_block_and_survive():
 
     assert func() == (9, 0)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_try_finally_block_and_survive():
     @with_goto
     def func():
@@ -776,7 +818,7 @@ def test_jump_into_try_finally_block_and_survive():
 
     assert func() == (9, 0, 1)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_try_block_and_survive():
     @with_goto
     def func():
@@ -794,7 +836,7 @@ def test_jump_into_try_block_and_survive():
 
     assert func() == (9, 0, 1)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_except_block():
     @with_goto
     def func():
@@ -810,7 +852,7 @@ def test_jump_out_of_except_block():
 
     assert func() == 'except'
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_except_block_and_live():
     @with_goto
     def func():
@@ -828,7 +870,7 @@ def test_jump_out_of_except_block_and_live():
 
     assert func() == (2, 0, 'except')
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_except_block():
     @with_goto
     def func():
@@ -843,7 +885,7 @@ def test_jump_into_except_block():
 
     assert func() == 3
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_except_block_and_live():
     @with_goto
     def func():
@@ -859,7 +901,7 @@ def test_jump_into_except_block_and_live():
 
     assert func() == (9, 3)
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_finally_block():
     @with_goto
     def func():
@@ -874,7 +916,7 @@ def test_jump_out_of_finally_block():
 
     assert func() == 'finally'
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_finally_block_and_live():
     @with_goto
     def func():
@@ -891,7 +933,7 @@ def test_jump_out_of_finally_block_and_live():
 
     assert func() == (2, 0, 'finally')
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_out_of_try_in_except_in_finally_and_live():
     @with_goto
     def func():
@@ -918,7 +960,7 @@ def test_jump_out_of_try_in_except_in_finally_and_live():
 
     assert func() == (2, 0, 'try')
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_finally_block():
     @with_goto
     def func():
@@ -933,7 +975,7 @@ def test_jump_into_finally_block():
 
     assert func() == 2
 
-@pytest.mark.skipif(not try_finally_supported, reason="No try/finally patching support")
+@pytest.mark.xfail(not try_finally_supported, reason="No try/finally patching support")
 def test_jump_into_finally_block_and_live():
     @with_goto
     def func():

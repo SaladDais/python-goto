@@ -1,8 +1,15 @@
 # goto
 
 ![Python Test Status](https://github.com/SaladDais/python-goto/workflows/Run%20Python%20Tests/badge.svg)
+
 A function decorator to use `goto` in Python.
-Tested on Python 2.7 through 3.9. Functions with try/finally or with are not supported in Python 3.9+
+Tested on Python 2.7 through 3.10.
+
+Functions with try/finally or with are not supported in Python 3.9+
+
+3.10+ does not support `goto`ing out of a `while True` loop without placing a `break` after the `goto`, due
+to how its dead code elimination works.
+
 
 [![](https://imgs.xkcd.com/comics/goto.png)](https://xkcd.com/292/)
 

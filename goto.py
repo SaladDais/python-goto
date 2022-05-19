@@ -276,7 +276,8 @@ def _find_labels_and_gotos(code):
                          'SETUP_WITH', 'SETUP_ASYNC_WITH'):
             if opname1 == 'SETUP_FINALLY' and sys.version_info >= (3, 9):
                 raise NotImplementedError("finally semantics not supported in 3.9+")
-            block_counter = push_block(opname1, endoffset1 + oparg1)
+            # Make sure to convert the argument to the real offset using the given version's jump units
+            block_counter = push_block(opname1, endoffset1 + (oparg1 * _BYTECODE.jump_unit))
 
         elif opname1 == 'POP_EXCEPT':
             last_block = pop_block_of_type('<EXCEPT>')
