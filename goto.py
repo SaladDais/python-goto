@@ -21,13 +21,20 @@ class _Bytecode:
         x, y = None, None
         code = (lambda: x if x else y).__code__.co_code
         opcode, oparg = struct.unpack_from('BB', code, 2)
+        self.name_divisor = 1
 
         # Starting with Python 3.6, the bytecode format has been changed to use
         # 16-bit words (8-bit opcode + 8-bit argument) for each instruction,
         # as opposed to previously 24-bit (8-bit opcode + 16-bit argument) for
         # instructions that expect an argument or just 8-bit for those that don't.
         # https://bugs.python.org/issue26647
-        if dis.opname[opcode] == 'POP_JUMP_IF_FALSE':
+        if dis.opname[opcode] == 'RESUME':
+            # Python 3.11 and above use relative jumps, so the below math won't work!
+            self.argument = struct.Struct('B')
+            self.jump_unit = 2
+            self.have_argument = 0
+            self.name_divisor = 2
+        elif dis.opname[opcode] == 'POP_JUMP_IF_FALSE':
             self.argument = struct.Struct('B')
             self.have_argument = 0
             # As of Python 3.6, jump targets are still addressed by their byte
@@ -46,6 +53,7 @@ class _Bytecode:
         self.has_setup_except = 'SETUP_EXCEPT' in dis.opmap
         self.has_begin_finally = 'BEGIN_FINALLY' in dis.opmap
         self.has_with_except = 'WITH_EXCEPT_START' in dis.opmap
+        self.relative_jumps_only = 'POP_JUMP_FORWARD_IF_FALSE' in dis.opmap
 
         try:
             import __pypy__
@@ -66,6 +74,10 @@ try:
     _patched_code_cache[_Bytecode.__init__.__code__] = None
 except TypeError:
     _patched_code_cache = {}  # ...unless not supported
+
+
+def _get_name(code, index):
+    return code.co_names[index // _BYTECODE.name_divisor]
 
 
 def _make_code(code, codestring, data):
@@ -118,7 +130,12 @@ def _parse_instructions(code, yield_nones_at_end=0):
 
         extended_arg = 0
         extended_arg_offset = None
-        yield dis.opname[opcode], oparg, offset
+        opname = dis.opname[opcode]
+        if opname == "CACHE":
+            # Not a real instruction, just an inline `CACHE` for
+            # Python 3.11+
+            continue
+        yield opname, oparg, offset
 
     for _ in range(yield_nones_at_end):
         yield None, None, None
@@ -126,6 +143,9 @@ def _parse_instructions(code, yield_nones_at_end=0):
 
 def _get_instruction_size(opname, oparg=0):
     size = 1
+
+    if opname == "JUMP_ABSOLUTE" and _BYTECODE.relative_jumps_only:
+        opname = "JUMP_FORWARD"
 
     extended_arg = oparg >> _BYTECODE.argument_bits
     if extended_arg != 0:
@@ -150,6 +170,18 @@ def _get_instructions_size(ops):
 
 
 def _write_instruction(buf, pos, opname, oparg=0):
+    # Python 3.11 and above are special, no more absolute jumps.
+    if opname == 'JUMP_ABSOLUTE' and _BYTECODE.relative_jumps_only:
+        # TODO: Our offset calculation is definitely not right.
+        jump_relative_point = pos + 2
+        jump_target = oparg * _BYTECODE.jump_unit
+        if jump_relative_point >= jump_target:
+            opname = 'JUMP_BACKWARD'
+            oparg = jump_relative_point - jump_target
+        else:
+            opname = 'JUMP_FORWARD'
+            oparg = jump_target - jump_relative_point
+
     extended_arg = oparg >> _BYTECODE.argument_bits
     if extended_arg != 0:
         pos = _write_instruction(buf, pos, 'EXTENDED_ARG', extended_arg)
@@ -248,10 +280,10 @@ def _find_labels_and_gotos(code):
         # check for special opcodes
         if opname1 in ('LOAD_GLOBAL', 'LOAD_NAME'):
             if opname2 == 'LOAD_ATTR' and opname3 == 'POP_TOP':
-                name = code.co_names[oparg1]
+                name = _get_name(code, oparg1)
                 if name == 'label':
                     if oparg2 in labels:
-                        co_name = code.co_names[oparg2]
+                        co_name = _get_name(code, oparg2)
                         raise SyntaxError('Ambiguous label {0!r}'.format(co_name))
                     labels[oparg2] = (offset1,
                                       offset4,
@@ -263,13 +295,13 @@ def _find_labels_and_gotos(code):
                                   list(block_stack),
                                   0))
             elif opname2 == 'LOAD_ATTR' and opname3 == 'STORE_ATTR':
-                if code.co_names[oparg1] == 'goto' and \
-                        code.co_names[oparg2] in ('param', 'params'):
+                if _get_name(code, oparg1) == 'goto' and \
+                        _get_name(code, oparg2) in ('param', 'params'):
                     gotos.append((offset1,
                                   offset4,
                                   oparg3,
                                   list(block_stack),
-                                  code.co_names[oparg2]))
+                                  _get_name(code, oparg2)))
 
         elif opname1 in ('SETUP_LOOP', 'FOR_ITER',
                          'SETUP_EXCEPT', 'SETUP_FINALLY',
@@ -389,7 +421,7 @@ def _patch_code(code):
         try:
             _, target, target_stack = labels[label_target]
         except KeyError:
-            raise SyntaxError('Unknown label {0!r}'.format(code.co_names[label_target]))
+            raise SyntaxError('Unknown label {0!r}'.format(_get_name(code, label_target)))
 
         ops = []
 
