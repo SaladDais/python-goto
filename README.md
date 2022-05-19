@@ -1,18 +1,14 @@
 # goto
 
-[![Build Status](https://travis-ci.org/snoack/python-goto.svg?branch=master)](https://travis-ci.org/snoack/python-goto)
-[![Pypi Entry](https://badge.fury.io/py/goto-statement.svg)](https://pypi.python.org/pypi/goto-statement)
-
+![Python Test Status](https://github.com/SaladDais/python-goto/workflows/Run%20Python%20Tests/badge.svg)
 A function decorator to use `goto` in Python.
-Tested on Python 2.6 through 3.8 and PyPy.
+Tested on Python 2.7 through 3.9. Functions with try/finally or with are not supported in Python 3.9+
 
 [![](https://imgs.xkcd.com/comics/goto.png)](https://xkcd.com/292/)
 
 ## Installation
 
-```
-pip install goto-statement
-```
+Repo.
 
 ## Usage
 
